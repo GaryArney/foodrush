@@ -1,31 +1,27 @@
+// Define Constants directly in game.js again
 const GRID_WIDTH = 6;
 const GRID_HEIGHT = 6;
-const TILE_SIZE = 60; // Slightly smaller tiles might help on mobile
-const UI_AREA_HEIGHT = 160; // Reserve space at the top for UI
+const TILE_SIZE = 60; 
+const UI_AREA_HEIGHT = 160; 
 const SPRITE_SHEET_KEY = 'foodSprites';
 const SPRITE_WIDTH = 16;
 const SPRITE_HEIGHT = 16;
 const TOTAL_SPRITES = 81;
-const SPRITES_PER_ROW = 9; // Spritesheet layout: 9 columns
-const ITEM_TYPES_TO_USE = 10; // Number of unique item types on the board at start
-const COLORS = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff]; // Red, Green, Blue, Yellow, Magenta
+const SPRITES_PER_ROW = 9; 
+const ITEM_TYPES_TO_USE = 10; 
+const COLORS = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff]; 
 
 const SPRITE_NAMES = [
-    "Red Apple", "Green Apple", "Cookie", "Egg", "Scrambled Egg",
-    "Cheese", "Baguette", "Potato", "Onion", "Water"
-]; // Indices 0-9
+    "Red Apple", "Green Apple", "Cookie", "Egg", "Scrambled Egg", // 0-4
+    "Cheese", "Baguette", "Potato", "Onion", "Water"          // 5-9
+]; 
 
 const STATIC_ORDERS_DEF = [
-    { id: 0, requiredIndices: [0] },          // 1: Red Apple
-    { id: 1, requiredIndices: [2, 3] },       // 2: Cookie, Egg
-    { id: 2, requiredIndices: [1, 5] },       // 3: Green Apple, Cheese
-    { id: 3, requiredIndices: [6, 7, 8] },    // 4: Baguette, Potato, Onion
-    { id: 4, requiredIndices: [4, 9] },       // 5: Scrambled Egg, Water
-    { id: 5, requiredIndices: [0, 1, 2] },    // 6: Red Apple, Green Apple, Cookie
-    { id: 6, requiredIndices: [3, 4, 5] },    // 7: Egg, Scrambled Egg, Cheese
-    { id: 7, requiredIndices: [7, 8, 9] },    // 8: Potato, Onion, Water
-    { id: 8, requiredIndices: [0, 3, 6, 9] }, // 9: Red Apple, Egg, Baguette, Water
-    { id: 9, requiredIndices: [1, 2, 5, 7, 8] } // 10: Green Apple, Cookie, Cheese, Potato, Onion
+    { id: 0, requiredIndices: [0] },                 // Order 1: Red Apple
+    { id: 1, requiredIndices: [1, 2] },              // Order 2: Green Apple, Cookie
+    { id: 2, requiredIndices: [3, 4, 5] },           // Order 3: Egg, Scrambled Egg, Cheese
+    { id: 3, requiredIndices: [6, 7, 8, 9] },        // Order 4: Baguette, Potato, Onion, Water
+    { id: 4, requiredIndices: [0, 2, 4, 6, 8] }      // Order 5: Red Apple, Cookie, Scrambled Egg, Baguette, Onion 
 ];
 
 let game;
@@ -37,23 +33,20 @@ class BootScene extends Phaser.Scene {
 
     preload() {
         console.log("BootScene: Preloading assets...");
+        // Use constants defined in constants.js
         this.load.spritesheet(SPRITE_SHEET_KEY, 'sprites/fooddd.png', {
             frameWidth: SPRITE_WIDTH,
             frameHeight: SPRITE_HEIGHT
         });
         
-        // Load sounds
         console.log("BootScene: Preloading sounds...");
         this.load.audio('swapSound', 'sounds/swap.mp3');
         this.load.audio('matchSound', 'sounds/match.mp3');
-        this.load.audio('bgm', 'sounds/bgm(reddish).mp3'); // Load BGM
+        this.load.audio('bgm', 'sounds/bgm(reddish).mp3');
     }
 
     create() {
         console.log("BootScene: Assets loaded, starting GameScene...");
-        // Log available frames to verify sprite sheet loading
-        // const texture = this.textures.get(SPRITE_SHEET_KEY);
-        // console.log(`Frames available in ${SPRITE_SHEET_KEY}: ${texture.frameTotal}`);
         this.scene.start('GameScene');
     }
 }
@@ -72,17 +65,21 @@ class GameScene extends Phaser.Scene {
 
         // Order System Properties
         this.gameOrders = [];
-        this.totalOrdersToWin = 10;
+        this.totalOrdersToWin = 5;
         this.isGameWon = false;
         this.winScreenGroup = null;
-        this.completedOrders = 0; // Added missing property back
+        this.completedOrders = 0;
+
+        // Hint System
+        this.hintedItems = new Set();
+        this.availableHintColors = [];
+        this.currentHintColorIndex = 0;
+        this.hintTimer = null;
+        this.hintedOrderSprites = new Set();
 
         // Configurable Order Parameters (Remove unused)
-        // this.maxOrders = 5; // Removed
-        // this.orderInterval = 20000; // Removed
-        // this.orderTimeLimit = 60000; // Removed
         this.minOrderItems = 1;
-        this.maxOrderItems = 3; // Adjusted max items
+        this.maxOrderItems = 3;
     }
 
     preload() {
@@ -92,6 +89,12 @@ class GameScene extends Phaser.Scene {
     create() {
         console.log("GameScene: Creating...");
 
+        // Explicitly clear any previous display group content FIRST
+        if (this.orderDisplayGroup) {
+            this.orderDisplayGroup.clear(true, true); // Destroy children
+            console.log("Cleared previous order display group.");
+        }
+        // Now create fresh groups
         this.items = this.add.group();
         this.orderDisplayGroup = this.add.group();
         this.refillItemGenerationBag();
@@ -106,35 +109,54 @@ class GameScene extends Phaser.Scene {
         const uiXPadding = 10;
         const uiYPadding = 10;
         let currentY = uiYPadding;
+        const orderLabelSpacing = 60; // Space for "Order X: " text
+        const orderSpriteSize = TILE_SIZE * 0.4; // Smaller sprites for UI
+        const orderSpritePadding = 4;
+        const orderLineHeight = Math.max(16, orderSpriteSize + 4); // Height for each order line
+        const uiDepth = 5; // Depth for UI elements
 
         // Initialize static orders & create displays in UI area
         this.gameOrders = STATIC_ORDERS_DEF.map(def => ({
             ...def,
             requiredNames: def.requiredIndices.map(index => SPRITE_NAMES[index] || `Item ${index + 1}`),
             completed: false,
-            display: null
+            displayLabel: null, // Text object for "Order X:"
+            displaySprites: [] // Array of sprite objects for required items
         }));
-
-        const orderFontSize = '10px';
-        const orderYSpacing = 12;
-
+        
+        // Loop creating order UI
         this.gameOrders.forEach((order, index) => {
-            const orderText = `Order ${order.id + 1}: [${order.requiredNames.join(', ')}]`;
-            const displayTxt = this.add.text(uiXPadding, currentY, orderText,
-                { fontSize: orderFontSize, fill: '#fff', padding: { x: 2, y: 1 } }
-            );
-            order.display = displayTxt;
-            this.orderDisplayGroup.add(displayTxt);
-            currentY += orderYSpacing;
+            // Create the "Order X: " Label Text
+            const labelText = `Order ${order.id + 1}:`;
+            const label = this.add.text(uiXPadding, currentY + orderLineHeight / 2, labelText, 
+                { fontSize: '12px', fill: '#fff' }
+            ).setOrigin(0, 0.5).setDepth(uiDepth); // Set depth
+            order.displayLabel = label;
+            this.orderDisplayGroup.add(label);
+
+            // Create Sprites for Required Items
+            let spriteX = uiXPadding + orderLabelSpacing;
+            order.requiredIndices.forEach(itemIndex => {
+                const sprite = this.add.sprite(spriteX, currentY + orderLineHeight / 2, SPRITE_SHEET_KEY, itemIndex)
+                    .setDisplaySize(orderSpriteSize, orderSpriteSize)
+                    .setOrigin(0, 0.5)
+                    .setDepth(uiDepth); // Set depth
+                
+                order.displaySprites.push(sprite);
+                this.orderDisplayGroup.add(sprite);
+                spriteX += orderSpriteSize + orderSpritePadding; // Move to next sprite position
+            });
+
+            currentY += orderLineHeight; // Move to next line
         });
 
-        // Add Completed Counter (Top Right)
+        // Completed Counter (Top Right)
         this.completedOrdersText = this.add.text(
             this.game.config.width - uiXPadding,
             uiYPadding,
             `Completed: ${this.completedOrders}/${this.totalOrdersToWin}`,
             { fontSize: '14px', fill: '#0f0', align: 'right' }
-        ).setOrigin(1, 0);
+        ).setOrigin(1, 0).setDepth(uiDepth); // Set depth for counter
 
         // --- Grid Setup (Below UI) ---
         this.createGridData();
@@ -149,23 +171,37 @@ class GameScene extends Phaser.Scene {
         ).setOrigin(0.5).setDepth(11);
         this.winScreenGroup.addMultiple([winBg, winText]);
         this.winScreenGroup.setVisible(false);
+
+        // Initial hint check after grid is drawn and stable
+        this.time.delayedCall(100, () => { // Slight delay to ensure visuals ready
+             if (!this.isGameWon) { // Don't check if game somehow starts won
+                 this.checkForHints();
+             }
+        });
     }
 
     update(time, delta) {
-       // Update static order display
+       // Update static order display for COMPLETION
         this.gameOrders.forEach(order => {
-            if (order.display && order.display.visible) { // Only update if visible
-                const baseText = `Order ${order.id + 1}: [${order.requiredNames.join(', ')}]`;
+            // Ensure label and sprites exist
+            if (order.displayLabel && order.displaySprites.length > 0) { 
                 if (order.completed) {
-                    if (order.display.text !== baseText + ' [DONE]') { // Avoid redundant updates
-                        order.display.setText(baseText + ' [DONE]');
-                        order.display.setStyle({ fill: '#55ff55', fontStyle: 'italic' }); // Brighter green
+                    // Apply visual cue to completed order (e.g., tint sprites)
+                    if (order.displaySprites[0].tintTopLeft !== 0x88ff88) { // Check tint only once
+                        order.displayLabel.setAlpha(0.6);
+                        order.displaySprites.forEach(sprite => {
+                            sprite.setTint(0x88ff88); // Apply green tint
+                            sprite.setAlpha(0.6);
+                        });
                     }
                 } else {
-                    // Reset text/style if it was previously marked done (e.g., replay)
-                     if (order.display.style.fontStyle === 'italic') {
-                         order.display.setText(baseText);
-                         order.display.setStyle({ fill: '#fff', fontStyle: 'normal' });
+                    // Reset visual cue if previously completed (e.g., on restart)
+                     if (order.displaySprites[0].tintTopLeft === 0x88ff88) { // Check tint
+                         order.displayLabel.setAlpha(1);
+                         order.displaySprites.forEach(sprite => {
+                            sprite.clearTint();
+                            sprite.setAlpha(1);
+                        });
                     }
                 }
             }
@@ -218,42 +254,12 @@ class GameScene extends Phaser.Scene {
     // Modified drawGrid for UI offset, centering, and rounded corners
     drawGrid() {
         console.log("Drawing grid visuals...");
-        const gridOffsetY = UI_AREA_HEIGHT;
-        const gridXPadding = (this.game.config.width - (GRID_WIDTH * TILE_SIZE)) / 2;
-        const cornerRadius = 10; // Adjust corner rounding
-
         for (let y = 0; y < GRID_HEIGHT; y++) {
             for (let x = 0; x < GRID_WIDTH; x++) {
                 const gridItem = this.grid[y][x];
                 if (!gridItem) { console.error(`Null item at (${x},${y}) in drawGrid`); continue; }
-
-                const tileCenterX = x * TILE_SIZE + TILE_SIZE / 2 + gridXPadding;
-                const tileCenterY = y * TILE_SIZE + TILE_SIZE / 2 + gridOffsetY;
-                const bgSize = TILE_SIZE * 0.9;
-                const spriteSize = TILE_SIZE * 0.75;
-                const textOffsetY = TILE_SIZE * 0.3;
                 
-                // --- Use Graphics for Rounded Background ---
-                const graphicsX = tileCenterX - bgSize / 2;
-                const graphicsY = tileCenterY - bgSize / 2;
-                const backgroundGraphics = this.add.graphics({ x: graphicsX, y: graphicsY });
-                backgroundGraphics.fillStyle(gridItem.color, 1);
-                // Add stroke style (optional)
-                // backgroundGraphics.lineStyle(1, 0xaaaaaa, 1); 
-                backgroundGraphics.fillRoundedRect(0, 0, bgSize, bgSize, cornerRadius); 
-                // if using lineStyle, also call: backgroundGraphics.strokeRoundedRect(0, 0, bgSize, bgSize, cornerRadius);
-                backgroundGraphics.setDepth(0);
-                // --- End Graphics ---
-
-                const itemSprite = this.items.create(tileCenterX, tileCenterY, SPRITE_SHEET_KEY, gridItem.spriteIndex)
-                    .setDisplaySize(spriteSize, spriteSize).setInteractive().setDepth(1);
-                itemSprite.clearTint();
-                const debugText = this.add.text(tileCenterX, tileCenterY + textOffsetY, `${gridItem.spriteIndex + 1}`, { fontSize: '9px', fill: '#000', backgroundColor: '#fff', padding: { x: 1, y: 0 } }).setOrigin(0.5).setDepth(2);
-
-                gridItem.sprite = itemSprite;
-                itemSprite.setData('gridData', gridItem);
-                itemSprite.setData('background', backgroundGraphics); // Store graphics object
-                itemSprite.setData('debugText', debugText);
+                this._createGridItemVisuals(gridItem, x, y); // Use helper
             }
         }
         console.log("Grid visuals drawn.");
@@ -316,11 +322,9 @@ class GameScene extends Phaser.Scene {
     // --- Game Logic Methods ---
     attemptSwap(item1, item2) {
         if (!this.canSwap) return;
-        // console.log(`Attempting swap...`); // Less verbose
         this.canSwap = false;
 
-        // Play swap sound
-        this.sound.play('swapSound', { volume: 0.5 }); // Adjust volume
+        this.sound.play('swapSound', { volume: 0.5 });
 
         const item1Data = item1.getData('gridData');
         const item2Data = item2.getData('gridData');
@@ -344,80 +348,55 @@ class GameScene extends Phaser.Scene {
             const allMatches = [...new Set([...matches1, ...matches2])];
 
             if (allMatches.length > 0) {
-                // console.log("Match found by player swap!");
-                this.processMatches(allMatches);
+                this.processMatches(allMatches); // processMatches calls stopAllHints
             } else {
-                // console.log("No match from swap, swap is permanent.");
                 this.canSwap = true;
+                // Check for hints AFTER board is stable from a non-matching swap
+                this.checkForHints(); // checkForHints calls stopAllHints
             }
         });
     }
     
     // Modified swapItemsVisually for Graphics objects
     swapItemsVisually(item1, item2, onCompleteCallback) {
-        const item1Data = item1.getData('gridData'); const item2Data = item2.getData('gridData');
+        const item1Data = item1.getData('gridData'); 
+        const item2Data = item2.getData('gridData');
         if (!item1Data || !item2Data) return;
-        const gridOffsetY = UI_AREA_HEIGHT;
-        const gridXPadding = (this.game.config.width - (GRID_WIDTH * TILE_SIZE)) / 2;
-        const textOffsetY = TILE_SIZE * 0.3;
+
+        // Get target world positions using helper
+        const targetPos1 = this.getWorldCoordinatesFromGrid(item2Data.x, item2Data.y);
+        const targetPos2 = this.getWorldCoordinatesFromGrid(item1Data.x, item1Data.y);
         
-        // Target CENTERS
-        const targetCenterX1 = item2Data.x * TILE_SIZE + TILE_SIZE / 2 + gridXPadding;
-        const targetCenterY1 = item2Data.y * TILE_SIZE + TILE_SIZE / 2 + gridOffsetY;
-        const targetCenterX2 = item1Data.x * TILE_SIZE + TILE_SIZE / 2 + gridXPadding;
-        const targetCenterY2 = item1Data.y * TILE_SIZE + TILE_SIZE / 2 + gridOffsetY;
+        // Tween item1 to targetPos1
+        this.tweens.add({
+            targets: item1,
+            x: targetPos1.x,
+            y: targetPos1.y,
+            duration: 200, 
+            ease: 'Power2',
+            onUpdate: (tween, target) => { // Update background position during tween
+                 this._setGridItemVisualPosition(target, target.x, target.y);
+            },
+            onComplete: (tween, targets) => { // Ensure final position is exact
+                targets.forEach(target => this._setGridItemVisualPosition(target, targetPos1.x, targetPos1.y));
+            }
+        });
 
-        const item1DebugText = item1.getData('debugText'); const item2DebugText = item2.getData('debugText');
-        const item1Background = item1.getData('background'); const item2Background = item2.getData('background');
-        
-        // Target TOP-LEFT for Graphics objects
-        const bgSize = TILE_SIZE * 0.9;
-        const targetGraphicsX1 = targetCenterX1 - bgSize / 2;
-        const targetGraphicsY1 = targetCenterY1 - bgSize / 2;
-        const targetGraphicsX2 = targetCenterX2 - bgSize / 2;
-        const targetGraphicsY2 = targetCenterY2 - bgSize / 2;
-
-        // Combine targets, filtering nulls
-        const targets1 = [item1, item1DebugText, item1Background].filter(t => t);
-        const targets2 = [item2, item2DebugText, item2Background].filter(t => t);
-
-        if(targets1.length > 0) {
-            this.tweens.add({
-                targets: targets1,
-                x: (target) => { // Calculate target X based on type
-                    if (target === item1) return targetCenterX1; // Sprite uses center
-                    if (target === item1DebugText) return targetCenterX1;
-                    if (target === item1Background) return targetGraphicsX1; // Graphics uses top-left
-                    return target.x; // Fallback
-                },
-                y: (target) => { // Calculate target Y based on type
-                    if (target === item1) return targetCenterY1;
-                    if (target === item1DebugText) return targetCenterY1 + textOffsetY;
-                    if (target === item1Background) return targetGraphicsY1;
-                    return target.y; // Fallback
-                },
-                duration: 200, ease: 'Power2'
-            });
-        }
-        if(targets2.length > 0) {
-            this.tweens.add({
-                targets: targets2,
-                x: (target) => {
-                    if (target === item2) return targetCenterX2;
-                    if (target === item2DebugText) return targetCenterX2;
-                    if (target === item2Background) return targetGraphicsX2;
-                    return target.x;
-                },
-                y: (target) => {
-                    if (target === item2) return targetCenterY2;
-                    if (target === item2DebugText) return targetCenterY2 + textOffsetY;
-                    if (target === item2Background) return targetGraphicsY2;
-                    return target.y;
-                },
-                duration: 200, ease: 'Power2',
-                onComplete: onCompleteCallback
-            });
-        }
+        // Tween item2 to targetPos2
+        this.tweens.add({
+            targets: item2,
+            x: targetPos2.x,
+            y: targetPos2.y,
+            duration: 200, 
+            ease: 'Power2',
+            onUpdate: (tween, target) => {
+                 this._setGridItemVisualPosition(target, target.x, target.y);
+            },
+             onComplete: (tween, targets) => {
+                targets.forEach(target => this._setGridItemVisualPosition(target, targetPos2.x, targetPos2.y));
+                if (onCompleteCallback) onCompleteCallback(); // Call original callback
+            }
+        });
     }
 
     findMatchesInvolving(x, y) {
@@ -563,174 +542,435 @@ class GameScene extends Phaser.Scene {
     // --- Matching and Replacement Logic ---
     processMatches(matches) {
         if (matches.length === 0 || this.isGameWon) {
-            this.canSwap = !this.isGameWon;
+            // If no matches, ensure hints are checked if board state allows
+            if (!this.isGameWon && this.canSwap) this.checkForHints(); 
             return;
         }
         
-        // Play match sound
-        this.sound.play('matchSound', { volume: 0.6 }); // Adjust volume
-        
+        this.sound.play('matchSound', { volume: 0.6 }); 
+        this.stopAllHints(); // Stop hints before processing
+        this.canSwap = false; // Disable swaps during processing
+
         console.log(`Processing ${matches.length} matched items.`);
         const uniqueItems = [...new Set(matches)];
         const matchedIndices = uniqueItems.map(itemData => itemData.spriteIndex);
+        const matchLocations = uniqueItems.map(itemData => ({ x: itemData.x, y: itemData.y })); // Store locations for potential refill
 
         let orderCompletedThisTurn = false;
-
-        // Check static orders
+        // --- Check Order Fulfillment --- 
         for (let i = 0; i < this.gameOrders.length; i++) {
             const order = this.gameOrders[i];
             if (!order.completed) {
                 const allRequirementsMet = order.requiredIndices.every(reqIndex => matchedIndices.includes(reqIndex));
                 if (allRequirementsMet) {
-                    console.log(`Static Order ${order.id + 1} requirements met!`);
+                    console.log(`Static Order ${order.id + 1} requirements met by match!`);
                     order.completed = true;
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
                     orderCompletedThisTurn = true;
-
+                    
                     if (this.completedOrders >= this.totalOrdersToWin) {
                         this.triggerWin();
-                        return;
+                        return; // Exit early on win
                     }
-                    break;
+                    // Don't break, allow multiple orders potentially completed by one match?
                 }
             }
         }
         // --- End Order Fulfillment Check ---
 
-        const removedLocations = uniqueItems.map(itemData => ({ x: itemData.x, y: itemData.y }));
-        let tweensCompleted = 0;
-        const totalTweens = uniqueItems.length;
+        // --- Bonus Item Mechanic --- 
+        let bonusItemDataToGenerate = null; // Initialize as null
 
-        uniqueItems.forEach(itemData => {
-            if (itemData.sprite) {
-                const targets = [itemData.sprite, itemData.sprite.getData('background'), itemData.sprite.getData('debugText')].filter(t => t);
-                if (targets.length > 0) {
-                    this.tweens.add({
-                        targets: targets,
-                        scaleX: 0, scaleY: 0, alpha: 0,
-                        duration: 300, ease: 'Power2',
-                        onComplete: () => {
-                            tweensCompleted++;
-                            if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, removedLocations); }
+        if (!orderCompletedThisTurn) {
+            console.log("Match did not complete order, checking for bonus...");
+
+            // 1. Find largest incomplete order(s)
+            let largestIncompleteOrderSize = 0;
+            let potentialTargetOrders = [];
+            this.gameOrders.forEach(order => {
+                if (!order.completed) {
+                    if (order.requiredIndices.length > largestIncompleteOrderSize) {
+                        largestIncompleteOrderSize = order.requiredIndices.length;
+                        potentialTargetOrders = [order]; // Reset list
+                    } else if (order.requiredIndices.length === largestIncompleteOrderSize) {
+                        potentialTargetOrders.push(order);
+                    }
+                }
+            });
+
+            if (potentialTargetOrders.length > 0) {
+                // 2. Select target order (random tie-break)
+                const targetOrder = Phaser.Utils.Array.GetRandom(potentialTargetOrders);
+                console.log(`Target order for bonus: Order ${targetOrder.id + 1} (Size: ${largestIncompleteOrderSize})`);
+
+                // 3. Handle Match 7+
+                if (matches.length >= 7) {
+                    console.log("Match 7+ bonus: Auto-completing largest order.");
+                    targetOrder.completed = true;
+                    this.completedOrders++;
+                    this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
+                     // Still need to clear the original match visuals
+                    this.clearAndRefill(uniqueItems, matchLocations); // No bonus data needed
+                    if (this.completedOrders >= this.totalOrdersToWin) {
+                         this.triggerWin();
+                    }
+                    return; // Exit after handling Match 7+
+                }
+
+                // 4. Handle Match 3-6: Calculate bonus items
+                let numBonusItems = 0;
+                if (matches.length === 3) numBonusItems = 1;
+                else if (matches.length === 4) numBonusItems = 2;
+                else if (matches.length === 5) numBonusItems = 3;
+                else if (matches.length === 6) numBonusItems = 4;
+
+                if (numBonusItems > 0) {
+                    // 5. Determine Bonus Color
+                    const colorCounts = {};
+                    COLORS.forEach(color => colorCounts[color] = 0);
+                    const targetIndices = new Set(targetOrder.requiredIndices);
+
+                    for(let y=0; y<GRID_HEIGHT; y++) {
+                        for(let x=0; x<GRID_WIDTH; x++) {
+                            const item = this.grid[y]?.[x];
+                            if(item && targetIndices.has(item.spriteIndex)) {
+                                colorCounts[item.color]++;
+                            }
+                        }
+                    }
+
+                    let maxCount = -1;
+                    let bestColors = [];
+                    COLORS.forEach(color => {
+                        if (colorCounts[color] > maxCount) {
+                            maxCount = colorCounts[color];
+                            bestColors = [color];
+                        } else if (colorCounts[color] === maxCount) {
+                            bestColors.push(color);
                         }
                     });
-                } else { tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, removedLocations); } }
-            } else { tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, removedLocations); } }
-        });
+                    
+                    const bonusColor = Phaser.Utils.Array.GetRandom(bestColors);
+                    console.log(`Bonus color chosen: ${bonusColor.toString(16)} (Count: ${maxCount})`);
+
+                    // 6. Select Bonus Item Indices
+                    const bonusItemIndices = [];
+                    for (let i = 0; i < numBonusItems; i++) {
+                        bonusItemIndices.push(Phaser.Utils.Array.GetRandom(targetOrder.requiredIndices));
+                    }
+                    console.log(`Bonus item indices: ${bonusItemIndices.join(', ')}`);
+
+                    // 7. Prepare Bonus Item Data Mapped to First N Match Locations
+                    bonusItemDataToGenerate = [];
+                    for (let i = 0; i < numBonusItems && i < matchLocations.length; i++) {
+                        bonusItemDataToGenerate.push({
+                            spriteIndex: bonusItemIndices[i],
+                            color: bonusColor,
+                            x: matchLocations[i].x, // Use location from original match
+                            y: matchLocations[i].y
+                        });
+                    }
+                }
+            } else {
+                 console.log("No incomplete orders found for bonus.");
+            }
+        } // End bonus mechanic check
+
+        // --- Clear Visuals and Refill --- 
+        // If bonus items were generated, call clearAndRefill immediately with bonus data
+        // Otherwise, proceed with normal shrink animation
+        if (bonusItemDataToGenerate) {
+             console.log("Calling clearAndRefill with bonus data.");
+             this.clearAndRefill(uniqueItems, matchLocations, bonusItemDataToGenerate);
+        } else {
+            // Original Shrink Animation Logic
+            console.log("No bonus or order completed, proceeding with normal shrink.");
+            let tweensCompleted = 0;
+            const totalTweens = uniqueItems.length;
+
+            uniqueItems.forEach(itemData => {
+                if (itemData.sprite) {
+                    this.tweens.killTweensOf(itemData.sprite); // Kill hint tweens
+                    const targets = [itemData.sprite, itemData.sprite.getData('background')].filter(t => t);
+                    if (targets.length > 0) {
+                        this.tweens.add({
+                            targets: targets,
+                            scaleX: 0, scaleY: 0, alpha: 0,
+                            duration: 300, ease: 'Power2',
+                            onComplete: () => {
+                                tweensCompleted++;
+                                if (tweensCompleted === totalTweens) { 
+                                    this.clearAndRefill(uniqueItems, matchLocations); // Pass locations
+                                }
+                            }
+                        });
+                    } else { 
+                        tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, matchLocations); } 
+                    }
+                } else { 
+                    tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, matchLocations); } 
+                }
+            });
+        }
     }
-    clearAndRefill(removedItems, locations) {
-        console.log("Clearing data and triggering instant replacement.");
+
+    // Modify clearAndRefill signature
+    clearAndRefill(removedItems, locations, bonusData = null) {
+        console.log(`Clearing data (Bonus Data Present: ${!!bonusData}). Triggering replacement.`);
         removedItems.forEach(itemData => {
-             // Ensure grid cell is marked as empty
+             // Grid null check...
              if (this.grid[itemData.y] && this.grid[itemData.y][itemData.x] === itemData) {
                   this.grid[itemData.y][itemData.x] = null;
              } else {
-                 // Still try to ensure the grid slot is null if coordinates are valid
                  if(this.grid[itemData.y]) this.grid[itemData.y][itemData.x] = null;
              }
 
-             // Destroy associated Phaser objects if they exist
+             // Destroy associated visuals...
              if (itemData.sprite) {
                  const sprite = itemData.sprite;
                  const background = sprite.getData('background');
-                 const debugText = sprite.getData('debugText');
                  if (sprite) sprite.destroy();
                  if (background) background.destroy();
-                 if (debugText) debugText.destroy();
              }
-             itemData.sprite = null; // Explicitly clear sprite ref
+             itemData.sprite = null; 
         });
-
-        // Call the new instant replacement function
-        this.generateReplacements(locations);
+        
+        // Pass bonusData down to generateReplacements
+        this.generateReplacements(locations, bonusData);
     }
-    generateReplacements(locations) {
+
+    // Modify generateReplacements signature & logic
+    generateReplacements(locations, bonusData = null) {
         let newlyGeneratedItems = [];
-        const gridOffsetY = UI_AREA_HEIGHT;
-        const gridXPadding = (this.game.config.width - (GRID_WIDTH * TILE_SIZE)) / 2;
-        const cornerRadius = 10;
+        const locationsFilledByBonus = new Set(); // Track locations used by bonus items
+        const locationKey = (loc) => `${loc.x},${loc.y}`; // Helper for Set keys
 
-        if (locations.length === 0) { this.preventAutoMatches(newlyGeneratedItems); return; }
+        // 1. Generate Specific Bonus Items First
+        if (bonusData) {
+             console.log(`Generating ${bonusData.length} bonus items.`);
+             bonusData.forEach(bonusItem => {
+                const { x, y, spriteIndex, color } = bonusItem;
+                // Create data structure (similar to generateNonMatchingItem but with fixed values)
+                 const newItemData = { spriteIndex, color, x, y, sprite: null }; 
+                 this.grid[y][x] = newItemData;
+                 
+                 console.log(`Placing bonus item ${spriteIndex+1} (${color.toString(16)}) at (${x},${y})`);
+                 this._createGridItemVisuals(newItemData, x, y); // Use helper
 
+                 locationsFilledByBonus.add(locationKey({x, y}));
+                 newlyGeneratedItems.push(newItemData);
+             });
+        }
+
+        // 2. Generate Random Replacements for Remaining Locations
         locations.forEach(loc => {
+            // Skip locations already filled by bonus items
+            if (locationsFilledByBonus.has(locationKey(loc))) {
+                return; 
+            }
+
+            // Regular random generation for this empty spot
             const { x, y } = loc;
-            if (this.grid[y]?.[x] !== null) { return; }
+            if (this.grid[y]?.[x] !== null) { 
+                 // This might happen if a bonus item replaced an item that wasn't part of the original match? 
+                 // Or if locations has duplicates? Let's guard against it.
+                 console.warn(`generateReplacements: Location (${x},${y}) already filled, skipping random generation.`);
+                 return; 
+            }
             const newItemData = this.generateNonMatchingItem(x, y);
             this.grid[y][x] = newItemData;
 
-            const tileCenterX = x * TILE_SIZE + TILE_SIZE / 2 + gridXPadding;
-            const tileCenterY = y * TILE_SIZE + TILE_SIZE / 2 + gridOffsetY;
-            const bgSize = TILE_SIZE * 0.9;
-            const spriteSize = TILE_SIZE * 0.75;
-            const textOffsetY = TILE_SIZE * 0.3;
+            this._createGridItemVisuals(newItemData, x, y); // Use helper
 
-             // --- Use Graphics for Rounded Background ---
-            const graphicsX = tileCenterX - bgSize / 2;
-            const graphicsY = tileCenterY - bgSize / 2;
-            const backgroundGraphics = this.add.graphics({ x: graphicsX, y: graphicsY });
-            backgroundGraphics.fillStyle(newItemData.color, 1);
-            // backgroundGraphics.lineStyle(1, 0xaaaaaa, 1); 
-            backgroundGraphics.fillRoundedRect(0, 0, bgSize, bgSize, cornerRadius);
-            // backgroundGraphics.strokeRoundedRect(0, 0, bgSize, bgSize, cornerRadius);
-            backgroundGraphics.setDepth(0);
-            // --- End Graphics ---
-
-            const itemSprite = this.items.create(tileCenterX, tileCenterY, SPRITE_SHEET_KEY, newItemData.spriteIndex).setDisplaySize(spriteSize, spriteSize).setInteractive().setDepth(1);
-            itemSprite.clearTint();
-            const debugText = this.add.text(tileCenterX, tileCenterY + textOffsetY, `${newItemData.spriteIndex + 1}`, { fontSize: '9px', fill: '#000', backgroundColor: '#fff', padding: { x: 1, y: 0 } }).setOrigin(0.5).setDepth(2);
-
-            newItemData.sprite = itemSprite;
-            itemSprite.setData('gridData', newItemData); itemSprite.setData('background', backgroundGraphics); itemSprite.setData('debugText', debugText);
             newlyGeneratedItems.push(newItemData);
         });
+
+        console.log("Replacement generation complete, checking auto-matches...");
         this.preventAutoMatches(newlyGeneratedItems);
     }
-    preventAutoMatches(newlyGeneratedItems, enableSwapOnFinish = true) {
-        let loops = 0; const maxLoops = GRID_WIDTH * GRID_HEIGHT;
-        while (loops < maxLoops) {
-            loops++;
-            const autoMatches = this.findMatches();
-            if (autoMatches.length === 0) {
-                // console.log("No auto-matches found.");
-                break; 
+
+    // --- Hint System --- 
+
+    gridContainsItem(spriteIndex, color) {
+        for (let y = 0; y < GRID_HEIGHT; y++) {
+            for (let x = 0; x < GRID_WIDTH; x++) {
+                const item = this.grid[y]?.[x];
+                if (item && item.spriteIndex === spriteIndex && item.color === color) {
+                    return true; // Found one
+                }
             }
-            const itemsToRegenerate = [...new Set(autoMatches)];
-            console.log(`Auto-match detected! Regenerating ${itemsToRegenerate.length} items.`);
-            if (itemsToRegenerate.length === 0) { console.warn("autoMatches > 0 but no unique items? Breaking."); break; }
-            itemsToRegenerate.forEach(itemData => { this.regenerateItemColor(itemData); });
         }
-        if (loops >= maxLoops) { console.error("Max loops reached in preventAutoMatches."); }
+        return false; // Not found
+    }
+
+    stopAllHints() {
+        // Stop item hints
+        this.hintedItems.forEach(itemData => {
+            if (itemData.sprite) {
+                 this.tweens.killTweensOf(itemData.sprite);
+                 try { itemData.sprite.setAlpha(1); } catch (e) { /* ... */ }
+            }
+        });
+        this.hintedItems.clear();
+
+        // Stop order display hints
+        this.hintedOrderSprites.forEach(sprite => {
+            if (sprite && sprite.scene) { 
+                this.tweens.killTweensOf(sprite);
+                try { sprite.setAlpha(1); } catch (e) { /* ... */ }
+            }
+        });
+        this.hintedOrderSprites.clear(); 
+
+        // Remove the hint cycling timer
+        if (this.hintTimer) {
+            this.hintTimer.remove();
+            this.hintTimer = null;
+        }
+        this.availableHintColors = []; 
+        this.currentHintColorIndex = 0;
+    }
+
+    checkForHints() {
+        if (this.isGameWon) return;
         
-        if (enableSwapOnFinish) {
-             // console.log("Board stable. Enabling player input.");
-             this.canSwap = true; 
+        this.stopAllHints(); // Clear previous hints and timer first
+
+        const potentialHintsByColor = new Map(); // Map<color, Set<itemData>>
+
+        // 1. Check each eligible order and color combination
+        this.gameOrders.forEach(order => {
+            if (!order.completed && order.requiredIndices.length >= 3) {
+                for (const color of COLORS) {
+                    const allPresentWithThisColor = order.requiredIndices.every(reqIdx => 
+                        this.gridContainsItem(reqIdx, color)
+                    );
+
+                    if (allPresentWithThisColor) {
+                        // If condition met, find *all* items matching index AND color
+                        order.requiredIndices.forEach(reqIdx => {
+                            for (let y = 0; y < GRID_HEIGHT; y++) {
+                                for (let x = 0; x < GRID_WIDTH; x++) {
+                                    const itemData = this.grid[y]?.[x];
+                                    if (itemData && itemData.spriteIndex === reqIdx && itemData.color === color) {
+                                        if (!potentialHintsByColor.has(color)) {
+                                            potentialHintsByColor.set(color, new Set());
+                                        }
+                                        potentialHintsByColor.get(color).add(itemData);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                } // End color loop
+            }
+        }); // End order loop
+
+        // 2. Store the colors that actually have hints
+        this.availableHintColors = Array.from(potentialHintsByColor.keys());
+
+        // 3. If hints are available, start the timed cycle
+        if (this.availableHintColors.length > 0) {
+            console.log(`Hints available for colors: ${this.availableHintColors.map(c => c.toString(16)).join(', ')}`);
+            this.currentHintColorIndex = 0; // Start from the first color
+
+            // Create the 5-second repeating timer
+            this.hintTimer = this.time.addEvent({
+                delay: 5000, // 5 seconds
+                callback: this.displayNextHintColor,
+                callbackScope: this,
+                loop: true
+            });
+
+            // Display the first hint immediately
+            this.displayNextHintColor(); 
         } else {
-             // console.log("Board stable (Initial setup or reset). Swap not enabled here.");
+            console.log("No hints available.");
         }
     }
-    regenerateItemColor(itemData) {
-        const { x, y } = itemData;
-        const originalColor = itemData.color;
-        let loops = 0;
 
-        while (loops < COLORS.length + 1) { // Try all colors + 1 safety
-             loops++;
-             let newColor = Phaser.Utils.Array.GetRandom(COLORS);
-             if (newColor !== originalColor && !this.checkMatchAt(x, y, newColor)) {
-                 // Found a safe color
-                 itemData.color = newColor;
-                 const background = itemData.sprite?.getData('background');
-                 if (background) {
-                     background.setFillStyle(newColor);
-                 }
-                 // console.log(`Regenerated item at (${x}, ${y}) to color ${newColor}`);
-                 return; // Exit function
-             }
+    displayNextHintColor() {
+        if (this.isGameWon || !this.availableHintColors || this.availableHintColors.length === 0) {
+            this.stopAllHints(); 
+            return;
         }
-        // If we somehow tried all colors and none worked (very unlikely)
-        console.warn(`Could not find a non-matching color for item at (${x}, ${y}) after ${loops} attempts.`);
-        // Leave the item as is, the loop in preventAutoMatches might fix neighbors
+
+        // --- Reset alpha of previously hinted ITEMS --- 
+        this.hintedItems.forEach(itemData => {
+            if (itemData.sprite) {
+                 try { itemData.sprite.setAlpha(1); } catch(e) { /* ... */ }
+            }
+        });
+        this.hintedItems.clear(); 
+
+        // --- Reset alpha of previously hinted order SPRITES --- 
+        this.hintedOrderSprites.forEach(sprite => {
+             if (sprite && sprite.scene) { 
+                 try { sprite.setAlpha(1); } catch (e) { /* ... */ }
+             }
+        });
+        this.hintedOrderSprites.clear();
+        // --- --- --- --- --- --- --- --- --- --
+
+        // Determine the color for this cycle
+        const hintColorToShow = this.availableHintColors[this.currentHintColorIndex];
+
+        // Re-find items AND order SPRITES for this specific color hint
+        const itemsToAnimateNow = new Set();
+        const orderSpritesToAnimateNow = new Set(); // Store corresponding order SPRITES
+
+        this.gameOrders.forEach(order => {
+            if (!order.completed && order.requiredIndices.length >= 3) {
+                 const allPresentWithThisColor = order.requiredIndices.every(reqIdx => 
+                     this.gridContainsItem(reqIdx, hintColorToShow)
+                 );
+                 if (allPresentWithThisColor) {
+                     // If this order is hintable, add its DISPLAY SPRITES to the set
+                     if (order.displaySprites && order.displaySprites.length > 0) { 
+                         order.displaySprites.forEach(sprite => orderSpritesToAnimateNow.add(sprite));
+                     }
+                     // Find grid items (remains same)
+                     order.requiredIndices.forEach(reqIdx => {
+                         for (let y = 0; y < GRID_HEIGHT; y++) {
+                             for (let x = 0; x < GRID_WIDTH; x++) {
+                                 const itemData = this.grid[y]?.[x];
+                                 if (itemData && itemData.spriteIndex === reqIdx && itemData.color === hintColorToShow) {
+                                     itemsToAnimateNow.add(itemData);
+                                 }
+                             }
+                         }
+                     });
+                 }
+            }
+        });
+
+        // Start the single ALPHA pulse animation for grid ITEMS
+        itemsToAnimateNow.forEach(itemData => {
+            if (itemData.sprite) { 
+                this.hintedItems.add(itemData); // Track for potential cleanup
+                this.tweens.add({
+                    targets: itemData.sprite,
+                    alpha: 0.6, 
+                    duration: 250, 
+                    yoyo: true 
+                });
+            }
+        });
+
+        // Start the single ALPHA pulse animation for ORDER SPRITES
+        orderSpritesToAnimateNow.forEach(sprite => {
+            this.hintedOrderSprites.add(sprite); // Track the SPRITE for next cleanup
+            this.tweens.add({
+                targets: sprite, // Target the SPRITE
+                alpha: 0.6, 
+                duration: 250, 
+                yoyo: true 
+            });
+        });
+
+        // Move to the next color index
+        this.currentHintColorIndex = (this.currentHintColorIndex + 1) % this.availableHintColors.length;
     }
 
     // --- Order System Methods (Simplified) ---
@@ -754,11 +994,17 @@ class GameScene extends Phaser.Scene {
         console.log("--- RESTARTING GAME ---");
         this.isGameWon = false;
         this.completedOrders = 0;
+        this.stopAllHints(); // Stop hints before resetting visuals
 
         // Reset orders visually and data-wise
         this.gameOrders.forEach(order => {
             order.completed = false;
-            // Style reset is handled in update()
+            // Reset tint/alpha (handled by update now, but good practice)
+            if(order.displayLabel) order.displayLabel.setAlpha(1);
+            order.displaySprites.forEach(sprite => {
+                sprite.clearTint();
+                sprite.setAlpha(1);
+            });
         });
         this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
 
@@ -773,21 +1019,132 @@ class GameScene extends Phaser.Scene {
 
         // Enable swapping
         this.canSwap = true;
+        // Initial hint check after restart
+        this.time.delayedCall(100, this.checkForHints, [], this);
         console.log("--- GAME RESTARTED --- ");
+    }
+
+    // --- Helper Functions --- 
+
+    getWorldCoordinatesFromGrid(gridX, gridY) {
+        const gridOffsetY = UI_AREA_HEIGHT;
+        const gridXPadding = (this.game.config.width - (GRID_WIDTH * TILE_SIZE)) / 2;
+        const worldX = gridX * TILE_SIZE + TILE_SIZE / 2 + gridXPadding;
+        const worldY = gridY * TILE_SIZE + TILE_SIZE / 2 + gridOffsetY;
+        return { x: worldX, y: worldY };
+    }
+
+    // Helper to create background, sprite, and set data
+    _createGridItemVisuals(itemData, gridX, gridY) {
+        const worldPos = this.getWorldCoordinatesFromGrid(gridX, gridY);
+        const tileCenterX = worldPos.x;
+        const tileCenterY = worldPos.y;
+        const bgSize = TILE_SIZE * 0.9;
+        const spriteSize = TILE_SIZE * 0.75;
+        const cornerRadius = 10;
+
+        // Create Background Graphics
+        const graphicsX = tileCenterX - bgSize / 2;
+        const graphicsY = tileCenterY - bgSize / 2;
+        const backgroundGraphics = this.add.graphics({ x: graphicsX, y: graphicsY });
+        backgroundGraphics.fillStyle(itemData.color, 1);
+        backgroundGraphics.fillRoundedRect(0, 0, bgSize, bgSize, cornerRadius); 
+        backgroundGraphics.setDepth(0);
+
+        // Create Sprite
+        const itemSprite = this.items.create(tileCenterX, tileCenterY, SPRITE_SHEET_KEY, itemData.spriteIndex)
+            .setDisplaySize(spriteSize, spriteSize)
+            .setInteractive()
+            .setDepth(1);
+        itemSprite.clearTint();
+
+        // Store references
+        itemData.sprite = itemSprite;
+        itemSprite.setData('gridData', itemData);
+        itemSprite.setData('background', backgroundGraphics);
+
+        return itemSprite; // Return the main sprite object
+    }
+
+    // Helper to set position of sprite and its background
+    _setGridItemVisualPosition(itemSprite, worldX, worldY) {
+        if (!itemSprite) return;
+
+        itemSprite.setPosition(worldX, worldY);
+
+        const background = itemSprite.getData('background');
+        if (background) {
+            const bgSize = TILE_SIZE * 0.9;
+            const graphicsX = worldX - bgSize / 2; // Calculate top-left for graphics
+            const graphicsY = worldY - bgSize / 2;
+            background.setPosition(graphicsX, graphicsY);
+        }
+    }
+
+    // Moved preventAutoMatches and regenerateItemColor UP to be defined before createGridData calls them
+    preventAutoMatches(newlyGeneratedItems, enableSwapOnFinish = true) {
+        let loops = 0; const maxLoops = GRID_WIDTH * GRID_HEIGHT;
+        while (loops < maxLoops) {
+            loops++;
+            const autoMatches = this.findMatches();
+            if (autoMatches.length === 0) {
+                // console.log("No auto-matches found.");
+                break; 
+            }
+            const itemsToRegenerate = [...new Set(autoMatches)];
+            console.log(`Auto-match detected! Regenerating ${itemsToRegenerate.length} items.`);
+            if (itemsToRegenerate.length === 0) { console.warn("autoMatches > 0 but no unique items? Breaking."); break; }
+            itemsToRegenerate.forEach(itemData => { this.regenerateItemColor(itemData); });
+        }
+        if (loops >= maxLoops) { console.error("Max loops reached in preventAutoMatches."); }
+        
+        // Board is now stable, check for hints BEFORE enabling swap
+        this.checkForHints();
+        
+        if (enableSwapOnFinish) {
+             this.canSwap = true; 
+        }
+    }
+
+    regenerateItemColor(itemData) {
+        const { x, y } = itemData;
+        const originalColor = itemData.color;
+        let loops = 0;
+
+        while (loops < COLORS.length + 1) { // Try all colors + 1 safety
+             loops++;
+             let newColor = Phaser.Utils.Array.GetRandom(COLORS);
+             if (newColor !== originalColor && !this.checkMatchAt(x, y, newColor)) {
+                 // Found a safe color
+                 itemData.color = newColor;
+                 const background = itemData.sprite?.getData('background');
+                 if (background) {
+                     background.setFillStyle(newColor);
+                 }
+                 // console.log(`Regenerated item at (${x}, ${y}) to color ${newColor}`);
+                 return; // Exit function
+             }
+        }
+        // If we somehow tried all colors and none worked (very unlikely)
+        console.warn(`Could not find a non-matching color for item at (${x}, ${y}) after ${loops} attempts.`);
+        // Leave the item as is, the loop in preventAutoMatches might fix neighbors
     }
 }
 
-// Define config AFTER classes are defined
-const config = {
-    type: Phaser.AUTO,
-    width: GRID_WIDTH * TILE_SIZE + 20, // Grid width + padding
-    height: GRID_HEIGHT * TILE_SIZE + UI_AREA_HEIGHT, // Grid height + UI area height
-    parent: 'phaser-game',
-    backgroundColor: '#2d2d2d',
-    scene: [BootScene, GameScene]
-};
-
-// Initialize the game when the window loads
+// Define config and initialize the game when the window loads
 window.onload = () => {
+    // REMOVED constant checking logs
+
+    // Define config INSIDE onload (can be moved back out later if preferred)
+    const config = {
+        type: Phaser.AUTO,
+        width: GRID_WIDTH * TILE_SIZE + 20, 
+        height: GRID_HEIGHT * TILE_SIZE + UI_AREA_HEIGHT, 
+        parent: 'phaser-game',
+        backgroundColor: '#2d2d2d',
+        scene: [BootScene, GameScene] 
+    };
+
+    console.log("Window loaded, creating Phaser game with config:", config);
     game = new Phaser.Game(config);
 }; 
