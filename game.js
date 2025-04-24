@@ -3,25 +3,26 @@ const GRID_WIDTH = 6;
 const GRID_HEIGHT = 6;
 const TILE_SIZE = 60; 
 const UI_AREA_HEIGHT = 160; 
-const SPRITE_SHEET_KEY = 'foodSprites';
-const SPRITE_WIDTH = 16;
-const SPRITE_HEIGHT = 16;
-const TOTAL_SPRITES = 81;
-const SPRITES_PER_ROW = 9; 
 const ITEM_TYPES_TO_USE = 10; 
 const COLORS = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff]; 
 
+// Visual Constants for Grid Items
+const BG_SIZE = TILE_SIZE * 0.9;
+const CORNER_RADIUS = 10;
+const SPRITE_SIZE = TILE_SIZE * 0.75;
+const APPEAR_DURATION = 250; // Duration for appear animation - REINSTATED
+
 const SPRITE_NAMES = [
-    "Red Apple", "Green Apple", "Cookie", "Egg", "Scrambled Egg", // 0-4
-    "Cheese", "Baguette", "Potato", "Onion", "Water"          // 5-9
+    "Apple", "Avocado", "Bacon", "Banana", "Basil",          // 0-4
+    "Beer", "Beet", "Bell Pepper", "Blueberry", "Acorn"     // 5-9
 ]; 
 
 const STATIC_ORDERS_DEF = [
-    { id: 0, requiredIndices: [0] },                 // Order 1: Red Apple
-    { id: 1, requiredIndices: [1, 2] },              // Order 2: Green Apple, Cookie
-    { id: 2, requiredIndices: [3, 4, 5] },           // Order 3: Egg, Scrambled Egg, Cheese
-    { id: 3, requiredIndices: [6, 7, 8, 9] },        // Order 4: Baguette, Potato, Onion, Water
-    { id: 4, requiredIndices: [0, 2, 4, 6, 8] }      // Order 5: Red Apple, Cookie, Scrambled Egg, Baguette, Onion 
+    { id: 0, requiredIndices: [0] },                 // Order 1: Apple
+    { id: 1, requiredIndices: [1, 2] },              // Order 2: Avocado, Bacon
+    { id: 2, requiredIndices: [3, 4, 5] },           // Order 3: Banana, Basil, Beer
+    { id: 3, requiredIndices: [6, 7, 8, 9] },        // Order 4: Beet, Bell Pepper, Blueberry, Acorn
+    { id: 4, requiredIndices: [0, 2, 4, 6, 8] }      // Order 5: Apple, Bacon, Basil, Beet, Blueberry
 ];
 
 let game;
@@ -33,12 +34,19 @@ class BootScene extends Phaser.Scene {
 
     preload() {
         console.log("BootScene: Preloading assets...");
-        // Use constants defined in constants.js
-        this.load.spritesheet(SPRITE_SHEET_KEY, 'sprites/fooddd.png', {
-            frameWidth: SPRITE_WIDTH,
-            frameHeight: SPRITE_HEIGHT
-        });
-        
+        // Load individual images instead of spritesheet
+        console.log("BootScene: Loading individual item images...");
+        this.load.image('item_0', 'sprites/Apple/apple-outline-64.png');
+        this.load.image('item_1', 'sprites/Avocado/avocado-outline-64.png');
+        this.load.image('item_2', 'sprites/Bacon/bacon-outline-64.png');
+        this.load.image('item_3', 'sprites/Banana/banana-outline-64.png');
+        this.load.image('item_4', 'sprites/Basil/basil-outline-64.png');
+        this.load.image('item_5', 'sprites/Beer/beer-outline-64.png');
+        this.load.image('item_6', 'sprites/Beet/beet-outline-64.png');
+        this.load.image('item_7', 'sprites/Bell Pepper/bell-pepper-red-outline-64.png');
+        this.load.image('item_8', 'sprites/Blueberry/blueberry-outline-64.png');
+        this.load.image('item_9', 'sprites/Acorn/acorn-outline-64.png');
+
         console.log("BootScene: Preloading sounds...");
         this.load.audio('swapSound', 'sounds/swap.mp3');
         this.load.audio('matchSound', 'sounds/match.mp3');
@@ -137,7 +145,7 @@ class GameScene extends Phaser.Scene {
             // Create Sprites for Required Items
             let spriteX = uiXPadding + orderLabelSpacing;
             order.requiredIndices.forEach(itemIndex => {
-                const sprite = this.add.sprite(spriteX, currentY + orderLineHeight / 2, SPRITE_SHEET_KEY, itemIndex)
+                const sprite = this.add.sprite(spriteX, currentY + orderLineHeight / 2, 'item_' + itemIndex)
                     .setDisplaySize(orderSpriteSize, orderSpriteSize)
                     .setOrigin(0, 0.5)
                     .setDepth(uiDepth); // Set depth
@@ -254,14 +262,53 @@ class GameScene extends Phaser.Scene {
     // Modified drawGrid for UI offset, centering, and rounded corners
     drawGrid() {
         console.log("Drawing grid visuals...");
+        const initialSprites = [];
+        const initialBackgrounds = []; // Restore background array
+
         for (let y = 0; y < GRID_HEIGHT; y++) {
             for (let x = 0; x < GRID_WIDTH; x++) {
                 const gridItem = this.grid[y][x];
                 if (!gridItem) { console.error(`Null item at (${x},${y}) in drawGrid`); continue; }
-                
-                this._createGridItemVisuals(gridItem, x, y); // Use helper
+
+                // Create visuals (sets scale/alpha to 0) but don't tween yet
+                // _createGridItemVisuals now returns an object { sprite, background }
+                const visuals = this._createGridItemVisuals(gridItem, x, y);
+                if (visuals.sprite) { // Check if sprite was created
+                    initialSprites.push(visuals.sprite);
+                }
+                if (visuals.background) { // Check if background was created
+                     initialBackgrounds.push(visuals.background);
+                }
             }
         }
+
+        // Start Simultaneous Appear Tweens for initial grid
+        // Check both arrays
+        if (initialSprites.length > 0 || initialBackgrounds.length > 0) {
+            // Tween backgrounds if they exist
+            if (initialBackgrounds.length > 0) {
+                this.tweens.add({
+                    targets: initialBackgrounds,
+                    scaleX: 1, scaleY: 1, alpha: 1, // Background scales to 1
+                    duration: APPEAR_DURATION,
+                    ease: 'Power2'
+                });
+            }
+
+            // Tween sprites if they exist
+             if (initialSprites.length > 0) {
+                 this.tweens.add({
+                    targets: initialSprites,
+                     // Directly tween displayWidth and displayHeight instead of scale
+                     displayWidth: SPRITE_SIZE,
+                     displayHeight: SPRITE_SIZE,
+                     alpha: 1,
+                     duration: APPEAR_DURATION,
+                     ease: 'Power2'
+                 });
+             }
+        }
+
         console.log("Grid visuals drawn.");
     }
 
@@ -322,7 +369,16 @@ class GameScene extends Phaser.Scene {
     // --- Game Logic Methods ---
     attemptSwap(item1, item2) {
         if (!this.canSwap) return;
-        this.canSwap = false;
+        this.canSwap = false; // Prevent further swaps immediately
+
+        // --- FIX: Stop ALL hints (including timer) before starting swap ---
+        console.log("[AttemptSwap] Stopping all hints before swap.");
+        this.stopAllHints();
+        // --- END FIX ---
+
+        // Reset alpha just in case (stopAllHints should handle hinted items, but doesn't hurt)
+        item1.setAlpha(1);
+        item2.setAlpha(1);
 
         this.sound.play('swapSound', { volume: 0.5 });
 
@@ -348,33 +404,37 @@ class GameScene extends Phaser.Scene {
             const allMatches = [...new Set([...matches1, ...matches2])];
 
             if (allMatches.length > 0) {
-                this.processMatches(allMatches); // processMatches calls stopAllHints
+                console.log("[AttemptSwap] Swap resulted in matches. Processing...");
+                this.processMatches(allMatches); // processMatches handles its own hint logic internally
             } else {
+                // No match occurred after swap
+                console.log("[AttemptSwap] No match after swap. Re-enabling swap and checking hints.");
                 this.canSwap = true;
-                // Check for hints AFTER board is stable from a non-matching swap
-                this.checkForHints(); // checkForHints calls stopAllHints
+                // Check for hints AFTER board is stable (swap animation finished)
+                // Reduced delay slightly as APPEAR_DURATION isn't relevant here
+                this.time.delayedCall(50, this.checkForHints, [], this); 
             }
         });
     }
     
     // Modified swapItemsVisually for Graphics objects
     swapItemsVisually(item1, item2, onCompleteCallback) {
-        const item1Data = item1.getData('gridData'); 
+        const item1Data = item1.getData('gridData');
         const item2Data = item2.getData('gridData');
         if (!item1Data || !item2Data) return;
 
         // Get target world positions using helper
         const targetPos1 = this.getWorldCoordinatesFromGrid(item2Data.x, item2Data.y);
         const targetPos2 = this.getWorldCoordinatesFromGrid(item1Data.x, item1Data.y);
-        
+
         // Tween item1 to targetPos1
         this.tweens.add({
-            targets: item1,
+            targets: item1, // Target the sprite
             x: targetPos1.x,
             y: targetPos1.y,
-            duration: 200, 
+            duration: 200,
             ease: 'Power2',
-            onUpdate: (tween, target) => { // Update background position during tween
+            onUpdate: (tween, target) => { // Restore background position update during tween
                  this._setGridItemVisualPosition(target, target.x, target.y);
             },
             onComplete: (tween, targets) => { // Ensure final position is exact
@@ -384,12 +444,12 @@ class GameScene extends Phaser.Scene {
 
         // Tween item2 to targetPos2
         this.tweens.add({
-            targets: item2,
+            targets: item2, // Target the sprite
             x: targetPos2.x,
             y: targetPos2.y,
-            duration: 200, 
+            duration: 200,
             ease: 'Power2',
-            onUpdate: (tween, target) => {
+            onUpdate: (tween, target) => { // Restore background position update during tween
                  this._setGridItemVisualPosition(target, target.x, target.y);
             },
              onComplete: (tween, targets) => {
@@ -541,50 +601,106 @@ class GameScene extends Phaser.Scene {
 
     // --- Matching and Replacement Logic ---
     processMatches(matches) {
+        // --- LOGGING ---
+        console.log("[ProcessMatches] Start processing matches:", matches.length);
+        // --- END LOGGING ---
+
         if (matches.length === 0 || this.isGameWon) {
-            // If no matches, ensure hints are checked if board state allows
-            if (!this.isGameWon && this.canSwap) this.checkForHints(); 
+             console.log("[ProcessMatches] No matches or game won, exiting.");
+            // If no matches, ensure hints are checked AFTER board state is stable
+            if (!this.isGameWon && this.canSwap) {
+                this.time.delayedCall(APPEAR_DURATION + 50, this.checkForHints, [], this);
+            }
             return;
         }
-        
-        this.sound.play('matchSound', { volume: 0.6 }); 
-        this.stopAllHints(); // Stop hints before processing
-        this.canSwap = false; // Disable swaps during processing
 
-        console.log(`Processing ${matches.length} matched items.`);
+        this.sound.play('matchSound', { volume: 0.6 });
+        this.stopAllHints();
+        this.canSwap = false;
+
+        console.log(`[ProcessMatches] Found ${matches.length} matched items.`);
         const uniqueItems = [...new Set(matches)];
         const matchedIndices = uniqueItems.map(itemData => itemData.spriteIndex);
-        const matchLocations = uniqueItems.map(itemData => ({ x: itemData.x, y: itemData.y })); // Store locations for potential refill
+        const matchLocations = uniqueItems.map(itemData => ({ x: itemData.x, y: itemData.y }));
 
         let orderCompletedThisTurn = false;
-        // --- Check Order Fulfillment --- 
+        let spritesToAnimateUI = null; // Store the UI sprites of the first completed order
+
+        // --- Check Order Fulfillment ---
+        console.log("[ProcessMatches] Checking order fulfillment...");
         for (let i = 0; i < this.gameOrders.length; i++) {
             const order = this.gameOrders[i];
             if (!order.completed) {
                 const allRequirementsMet = order.requiredIndices.every(reqIndex => matchedIndices.includes(reqIndex));
                 if (allRequirementsMet) {
-                    console.log(`Static Order ${order.id + 1} requirements met by match!`);
-                    order.completed = true;
+                    console.log(`[ProcessMatches] Static Order ${order.id + 1} requirements met!`);
+                    order.completed = true; // Mark as complete (update loop handles UI tint)
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
-                    orderCompletedThisTurn = true;
-                    
-                    if (this.completedOrders >= this.totalOrdersToWin) {
-                        this.triggerWin();
-                        return; // Exit early on win
+
+                    if (!orderCompletedThisTurn) { // Store sprites for the *first* completed order only
+                        orderCompletedThisTurn = true;
+                        spritesToAnimateUI = order.displaySprites;
+                        console.log(`[ProcessMatches] First order completed this turn (ID: ${order.id}). Storing UI sprites for animation.`);
                     }
-                    // Don't break, allow multiple orders potentially completed by one match?
+
+                    // Check for win immediately
+                    if (this.completedOrders >= this.totalOrdersToWin) {
+                         console.log("[ProcessMatches] Win condition met during order check.");
+                         // Win screen triggered later
+                    }
                 }
             }
         }
+        console.log("[ProcessMatches] Finished checking orders.");
         // --- End Order Fulfillment Check ---
 
-        // --- Bonus Item Mechanic --- 
-        let bonusItemDataToGenerate = null; // Initialize as null
+        // --- Handle Animation & Clearing or Bonus ---
+        if (orderCompletedThisTurn) {
+            // --- LOGGING ---
+            console.log("[ProcessMatches] Order completed path chosen.");
+            // --- END LOGGING ---
 
-        if (!orderCompletedThisTurn) {
-            console.log("Match did not complete order, checking for bonus...");
+            // Start the non-blocking UI animation with copies of the UI sprites
+            if (spritesToAnimateUI && spritesToAnimateUI.length > 0) {
+                // --- LOGGING ---
+                console.log("[ProcessMatches] Starting playOrderUICompleteAnimation...");
+                // --- END LOGGING ---
+                this.playOrderUICompleteAnimation(spritesToAnimateUI);
+            } else {
+                 console.log("[ProcessMatches] Order completed but no UI sprites found to animate?");
+            }
 
+            // Clear the matched items *from the grid* using the standard shrink
+            // --- LOGGING ---
+            console.log("[ProcessMatches] Starting shrinkAndClear for matched grid items...");
+            // --- END LOGGING ---
+            this.shrinkAndClear(uniqueItems, matchLocations); // Handles its own visual destruction and refill callback
+
+             // --- LOGGING ---
+            console.log("[ProcessMatches] shrinkAndClear initiated. Proceeding.");
+             // --- END LOGGING ---
+
+            // Check win condition again *after* initiating the clear
+            if (this.completedOrders >= this.totalOrdersToWin && !this.isGameWon) {
+                // --- LOGGING ---
+                console.log("[ProcessMatches] Win condition met after order completion. Scheduling triggerWin.");
+                // --- END LOGGING ---
+                // Use a slight delay to allow shrink to start before win screen pops up
+                this.time.delayedCall(400, this.triggerWin, [], this);
+            }
+            // --- LOGGING ---
+            console.log("[ProcessMatches] End of order completed path (shrink/refill runs async).");
+             // --- END LOGGING ---
+            return; // Exit: shrinkAndClear handles the grid refill callback via clearAndRefill
+
+        } else { // No order completed, proceed with Bonus Item Mechanic
+             // --- LOGGING ---
+            console.log("[ProcessMatches] No order completed. Checking for bonus...");
+             // --- END LOGGING ---
+            let bonusItemDataToGenerate = null;
+
+            // --- Bonus Item Logic ---
             // 1. Find largest incomplete order(s)
             let largestIncompleteOrderSize = 0;
             let potentialTargetOrders = [];
@@ -599,194 +715,376 @@ class GameScene extends Phaser.Scene {
                 }
             });
 
+            let bonusLogicHandledClear = false; // Flag if bonus logic calls clear/refill
             if (potentialTargetOrders.length > 0) {
-                // 2. Select target order (random tie-break)
                 const targetOrder = Phaser.Utils.Array.GetRandom(potentialTargetOrders);
-                console.log(`Target order for bonus: Order ${targetOrder.id + 1} (Size: ${largestIncompleteOrderSize})`);
-
                 // 3. Handle Match 7+
                 if (matches.length >= 7) {
-                    console.log("Match 7+ bonus: Auto-completing largest order.");
+                    console.log("[ProcessMatches] Match 7+ bonus: Auto-completing largest order.");
                     targetOrder.completed = true;
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
-                     // Still need to clear the original match visuals
-                    this.clearAndRefill(uniqueItems, matchLocations); // No bonus data needed
-                    if (this.completedOrders >= this.totalOrdersToWin) {
+                    // Match 7+ clears directly, NO bonus items generated
+                     // --- LOGGING ---
+                    console.log("[ProcessMatches] Match 7+: Calling clearAndRefill directly.");
+                     // --- END LOGGING ---
+
+                    // --- FIX: Explicitly destroy visuals in Match 7+ path ---
+                    console.log("[ProcessMatches] Match 7+: Destroying original visuals...");
+                    uniqueItems.forEach(itemData => {
+                        if (itemData.sprite && itemData.sprite.scene) {
+                            const background = itemData.sprite.getData('background');
+                            try { itemData.sprite.destroy(); } catch (e) { console.warn("Match 7+ destroy error (sprite):", e); }
+                            itemData.sprite = null;
+                            if (background && background.scene) {
+                                try { background.destroy(); } catch (e) { console.warn("Match 7+ destroy error (background):", e); }
+                            }
+                        } else if (itemData.sprite) { itemData.sprite = null; }
+                    });
+                    // --- END FIX ---
+
+                    this.clearAndRefill(uniqueItems, matchLocations);
+                    bonusLogicHandledClear = true; // Mark that clear was handled
+                    if (this.completedOrders >= this.totalOrdersToWin && !this.isGameWon) {
+                         console.log("[ProcessMatches] Match 7+: Win condition met. Triggering win.");
                          this.triggerWin();
                     }
-                    return; // Exit after handling Match 7+
-                }
+                } else {
+                    // 4. Handle Match 3-6: Calculate bonus items
+                    let numBonusItems = 0;
+                    if (matches.length === 3) numBonusItems = 1;
+                    else if (matches.length === 4) numBonusItems = 2;
+                    else if (matches.length === 5) numBonusItems = 3;
+                    else if (matches.length === 6) numBonusItems = 4;
 
-                // 4. Handle Match 3-6: Calculate bonus items
-                let numBonusItems = 0;
-                if (matches.length === 3) numBonusItems = 1;
-                else if (matches.length === 4) numBonusItems = 2;
-                else if (matches.length === 5) numBonusItems = 3;
-                else if (matches.length === 6) numBonusItems = 4;
-
-                if (numBonusItems > 0) {
-                    // 5. Determine Bonus Color
-                    const colorCounts = {};
-                    COLORS.forEach(color => colorCounts[color] = 0);
-                    const targetIndices = new Set(targetOrder.requiredIndices);
-
-                    for(let y=0; y<GRID_HEIGHT; y++) {
-                        for(let x=0; x<GRID_WIDTH; x++) {
-                            const item = this.grid[y]?.[x];
-                            if(item && targetIndices.has(item.spriteIndex)) {
-                                colorCounts[item.color]++;
+                    if (numBonusItems > 0) {
+                         console.log(`[ProcessMatches] Calculating ${numBonusItems} bonus items...`);
+                        // --- Determine Bonus Color ---
+                        const colorCounts = {};
+                        COLORS.forEach(color => colorCounts[color] = 0);
+                        const targetIndices = new Set(targetOrder.requiredIndices);
+                        for(let y=0; y<GRID_HEIGHT; y++) {
+                            for(let x=0; x<GRID_WIDTH; x++) {
+                                const item = this.grid[y]?.[x];
+                                if(item && targetIndices.has(item.spriteIndex)) {
+                                    colorCounts[item.color]++;
+                                }
                             }
                         }
-                    }
-
-                    let maxCount = -1;
-                    let bestColors = [];
-                    COLORS.forEach(color => {
-                        if (colorCounts[color] > maxCount) {
-                            maxCount = colorCounts[color];
-                            bestColors = [color];
-                        } else if (colorCounts[color] === maxCount) {
-                            bestColors.push(color);
-                        }
-                    });
-                    
-                    const bonusColor = Phaser.Utils.Array.GetRandom(bestColors);
-                    console.log(`Bonus color chosen: ${bonusColor.toString(16)} (Count: ${maxCount})`);
-
-                    // 6. Select Bonus Item Indices
-                    const bonusItemIndices = [];
-                    for (let i = 0; i < numBonusItems; i++) {
-                        bonusItemIndices.push(Phaser.Utils.Array.GetRandom(targetOrder.requiredIndices));
-                    }
-                    console.log(`Bonus item indices: ${bonusItemIndices.join(', ')}`);
-
-                    // 7. Prepare Bonus Item Data Mapped to First N Match Locations
-                    bonusItemDataToGenerate = [];
-                    for (let i = 0; i < numBonusItems && i < matchLocations.length; i++) {
-                        bonusItemDataToGenerate.push({
-                            spriteIndex: bonusItemIndices[i],
-                            color: bonusColor,
-                            x: matchLocations[i].x, // Use location from original match
-                            y: matchLocations[i].y
+                        let maxCount = -1;
+                        let bestColors = [];
+                        COLORS.forEach(color => {
+                            if (colorCounts[color] > maxCount) {
+                                maxCount = colorCounts[color];
+                                bestColors = [color];
+                            } else if (colorCounts[color] === maxCount) {
+                                bestColors.push(color);
+                            }
                         });
+                        const bonusColor = Phaser.Utils.Array.GetRandom(bestColors);
+                        console.log(`[ProcessMatches] Bonus color chosen: ${bonusColor.toString(16)}`);
+
+                        // --- Select Bonus Item Indices ---
+                        const bonusItemIndices = [];
+                        for (let i = 0; i < numBonusItems; i++) {
+                            bonusItemIndices.push(Phaser.Utils.Array.GetRandom(targetOrder.requiredIndices));
+                        }
+                        console.log(`[ProcessMatches] Bonus item indices: ${bonusItemIndices.join(', ')}`);
+
+                        // --- Prepare Bonus Item Data ---
+                        bonusItemDataToGenerate = [];
+                        for (let i = 0; i < numBonusItems && i < matchLocations.length; i++) {
+                             bonusItemDataToGenerate.push({
+                                spriteIndex: bonusItemIndices[i],
+                                color: bonusColor,
+                                x: matchLocations[i].x,
+                                y: matchLocations[i].y
+                             });
+                        }
+                         console.log(`[ProcessMatches] Prepared ${bonusItemDataToGenerate.length} bonus items.`);
+                    } else {
+                         console.log("[ProcessMatches] Match size doesn't qualify for bonus items.");
                     }
                 }
             } else {
-                 console.log("No incomplete orders found for bonus.");
+                 console.log("[ProcessMatches] No incomplete orders found for bonus check.");
             }
-        } // End bonus mechanic check
+             // --- End Bonus Item Logic ---
 
-        // --- Clear Visuals and Refill --- 
-        // If bonus items were generated, call clearAndRefill immediately with bonus data
-        // Otherwise, proceed with normal shrink animation
-        if (bonusItemDataToGenerate) {
-             console.log("Calling clearAndRefill with bonus data.");
-             this.clearAndRefill(uniqueItems, matchLocations, bonusItemDataToGenerate);
-        } else {
-            // Original Shrink Animation Logic
-            console.log("No bonus or order completed, proceeding with normal shrink.");
-            let tweensCompleted = 0;
-            const totalTweens = uniqueItems.length;
-
-            uniqueItems.forEach(itemData => {
-                if (itemData.sprite) {
-                    this.tweens.killTweensOf(itemData.sprite); // Kill hint tweens
-                    const targets = [itemData.sprite, itemData.sprite.getData('background')].filter(t => t);
-                    if (targets.length > 0) {
-                        this.tweens.add({
-                            targets: targets,
-                            scaleX: 0, scaleY: 0, alpha: 0,
-                            duration: 300, ease: 'Power2',
-                            onComplete: () => {
-                                tweensCompleted++;
-                                if (tweensCompleted === totalTweens) { 
-                                    this.clearAndRefill(uniqueItems, matchLocations); // Pass locations
-                                }
+             // --- Clear Visuals and Refill (Based on Bonus/Normal) ---
+             if (!bonusLogicHandledClear) { // Only run if Match 7+ didn't already clear
+                if (bonusItemDataToGenerate && bonusItemDataToGenerate.length > 0) {
+                    // --- LOGGING ---
+                    console.log("[ProcessMatches] Bonus items generated. Destroying original visuals then calling clearAndRefill.");
+                    // --- END LOGGING ---
+                    // --- FIX: Destroy original matched visuals FIRST in bonus path ---
+                    uniqueItems.forEach(itemData => {
+                        if (itemData.sprite && itemData.sprite.scene) {
+                            const background = itemData.sprite.getData('background');
+                            try { itemData.sprite.destroy(); } catch (e) { /* ignore */ }
+                            itemData.sprite = null;
+                            if (background && background.scene) {
+                                try { background.destroy(); } catch (e) { /* ignore */ }
                             }
-                        });
-                    } else { 
-                        tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, matchLocations); } 
-                    }
-                } else { 
-                    tweensCompleted++; if (tweensCompleted === totalTweens) { this.clearAndRefill(uniqueItems, matchLocations); } 
+                        } else if (itemData.sprite) { itemData.sprite = null; }
+                    });
+                    // --- END FIX ---
+                    this.clearAndRefill(uniqueItems, matchLocations, bonusItemDataToGenerate);
+                } else {
+                    // --- LOGGING ---
+                    console.log("[ProcessMatches] No bonus generated. Starting standard shrinkAndClear.");
+                    // --- END LOGGING ---
+                    this.shrinkAndClear(uniqueItems, matchLocations); // Handles its own visual destruction and refill callback
                 }
-            });
+             } else {
+                  console.log("[ProcessMatches] Clear/Refill already handled by bonus logic (Match 7+).");
+             }
+             // --- LOGGING ---
+            console.log("[ProcessMatches] End of non-order-completed path (clear/refill runs async or was direct).");
+            // --- END LOGGING ---
+        }
+         // --- LOGGING ---
+        console.log("[ProcessMatches] End of function.");
+         // --- END LOGGING ---
+    }
+
+    // Helper for the standard shrink/clear operation
+    shrinkAndClear(itemsToClear, locations) {
+        // --- LOGGING ---
+        console.log("[ShrinkAndClear] Start shrinking items:", itemsToClear.length);
+        // --- END LOGGING ---
+        let tweensCompleted = 0;
+        const totalTweens = itemsToClear.length;
+        const itemsDataToPass = itemsToClear.map(item => ({ x: item.x, y: item.y, spriteIndex: item.spriteIndex, color: item.color, sprite: null })); // Pass data without sprite ref
+
+        itemsToClear.forEach(itemData => {
+            if (itemData.sprite && itemData.sprite.scene) {
+                this.tweens.killTweensOf(itemData.sprite);
+                const background = itemData.sprite.getData('background');
+                const targets = [itemData.sprite, background].filter(t => t && t.scene);
+                itemData.sprite = null; // Nullify ref immediately
+
+                if (targets.length > 0) {
+                    this.tweens.add({
+                        targets: targets,
+                        scaleX: 0, scaleY: 0, alpha: 0,
+                        duration: 300, ease: 'Power2',
+                        onComplete: () => {
+                            tweensCompleted++;
+                            targets.forEach(target => { if (target && target.destroy) { try { target.destroy(); } catch (e) {} } });
+                            if (tweensCompleted === totalTweens) {
+                                // --- LOGGING ---
+                                console.log("[ShrinkAndClear] Shrink tween complete. Calling clearAndRefill.");
+                                // --- END LOGGING ---
+                                this.clearAndRefill(itemsDataToPass, locations);
+                            }
+                        }
+                    });
+                } else {
+                    tweensCompleted++;
+                    if (tweensCompleted === totalTweens) {
+                        console.log("[ShrinkAndClear] No valid targets for tween. Calling clearAndRefill.");
+                        this.clearAndRefill(itemsDataToPass, locations);
+                    }
+                }
+            } else {
+                tweensCompleted++;
+                if (tweensCompleted === totalTweens) {
+                     console.log("[ShrinkAndClear] No valid sprite found. Calling clearAndRefill.");
+                     this.clearAndRefill(itemsDataToPass, locations);
+                }
+            }
+        });
+        if (totalTweens === 0 && itemsToClear.length > 0) {
+             console.log("[ShrinkAndClear] No items had sprites initially. Calling clearAndRefill.");
+             this.clearAndRefill(itemsDataToPass, locations);
         }
     }
 
-    // Modify clearAndRefill signature
-    clearAndRefill(removedItems, locations, bonusData = null) {
-        console.log(`Clearing data (Bonus Data Present: ${!!bonusData}). Triggering replacement.`);
-        removedItems.forEach(itemData => {
-             // Grid null check...
-             if (this.grid[itemData.y] && this.grid[itemData.y][itemData.x] === itemData) {
-                  this.grid[itemData.y][itemData.x] = null;
-             } else {
-                 if(this.grid[itemData.y]) this.grid[itemData.y][itemData.x] = null;
-             }
+    // NEW Animation function using UI sprite copies
+    playOrderUICompleteAnimation(originalUiSprites) {
+        // --- LOGGING ---
+        console.log("[PlayOrderUIAnimation] Start creating temp sprites for sequential animation.");
+        // --- END LOGGING ---
+        const tempSprites = [];
+        const animationDepth = 100; // Ensure animation is on top
 
-             // Destroy associated visuals...
-             if (itemData.sprite) {
-                 const sprite = itemData.sprite;
-                 const background = sprite.getData('background');
-                 if (sprite) sprite.destroy();
-                 if (background) background.destroy();
+        // 1. Create temporary copies AND store target coords
+        originalUiSprites.forEach(origSprite => {
+             if (origSprite && origSprite.scene) {
+                try {
+                    const tempSprite = this.add.sprite(origSprite.x, origSprite.y, origSprite.texture.key) // Start at original position for tweening FROM
+                        .setOrigin(origSprite.originX, origSprite.originY)
+                        .setDisplaySize(origSprite.displayWidth, origSprite.displayHeight)
+                        .setDepth(animationDepth)
+                        .setAlpha(0); // Start invisible
+
+                    // Store the final destination (original UI position)
+                    tempSprite.setData('targetX', origSprite.x);
+                    tempSprite.setData('targetY', origSprite.y);
+
+                    tempSprites.push(tempSprite);
+                 } catch (e) { console.error("Error creating temp sprite:", e); }
              }
-             itemData.sprite = null; 
         });
-        
-        // Pass bonusData down to generateReplacements
+
+        if (tempSprites.length === 0) {
+            console.warn("[PlayOrderUIAnimation] No temp sprites created.");
+            return;
+        }
+         console.log(`[PlayOrderUIAnimation] Created ${tempSprites.length} temp sprites. Starting sequential tweens.`);
+
+        // 2. Define animation parameters
+        const baseWidth = tempSprites[0].displayWidth > 0 ? tempSprites[0].displayWidth : TILE_SIZE * 0.4;
+        const targetScaleFactor = (TILE_SIZE * 1.0) / baseWidth; // Using 1.0 based on previous change
+        const screenCenterX = this.game.config.width / 2;
+        const popTargetY = UI_AREA_HEIGHT + (GRID_HEIGHT * TILE_SIZE) / 3; // Vertical center point for the pop
+        const popDuration = 350; // Duration of the pop animation
+        const returnDuration = 300; // Duration of the return animation
+        const staggerDelay = 100; // Delay between each sprite starting its animation
+
+        // REMOVED Multi-row layout logic
+
+        // 3. Trigger Animations Sequentially
+        tempSprites.forEach((sprite, index) => {
+            // Use delayedCall to stagger the start of each sprite's animation
+            this.time.delayedCall(index * staggerDelay, () => {
+                 console.log(`[PlayOrderUIAnimation] Animating sprite ${index}`);
+
+                 // First Tween: Pop out near center
+                 this.tweens.add({
+                     targets: sprite,
+                     x: screenCenterX, // Move to center X
+                     y: popTargetY,    // Move to center Y
+                     scale: targetScaleFactor, // Scale up
+                     alpha: 1,         // Fade in
+                     duration: popDuration,
+                     ease: 'Quad.easeOut',
+                     onComplete: () => {
+                         console.log(`[PlayOrderUIAnimation] Sprite ${index} pop complete. Returning...`);
+                         // Second Tween (Chained): Move back to UI and fade out
+                         this.tweens.add({
+                             targets: sprite,
+                             x: sprite.getData('targetX'), // Return to original UI X
+                             y: sprite.getData('targetY'), // Return to original UI Y
+                             scale: 0, // Scale down
+                             alpha: 0, // Fade out
+                             duration: returnDuration,
+                             ease: 'Power2',
+                             onComplete: (tween, targets) => {
+                                console.log(`[PlayOrderUIAnimation] Sprite ${index} return complete. Destroying.`);
+                                targets.forEach(target => target.destroy());
+                             }
+                         });
+                     }
+                 });
+
+            }, [], this); // End of delayedCall
+        });
+
+        // REMOVED old triggerFadeOut function
+    }
+
+    // Modified clearAndRefill - simplified back
+    clearAndRefill(removedItemsData, locations, bonusData = null) { // Expects data without sprite refs now
+        // --- LOGGING ---
+        console.log(`[ClearAndRefill] Start. Bonus: ${!!bonusData}. Items to clear from grid data: ${removedItemsData.length}`);
+        // --- END LOGGING ---
+
+        removedItemsData.forEach(itemData => {
+             // Clear grid data
+             // Need coords from itemData passed in
+             const y = itemData.y;
+             const x = itemData.x;
+             if (this.grid[y] && this.grid[y][x]) { // Check if grid slot exists
+                  // We might not need to check item equality if visuals are gone
+                  this.grid[y][x] = null;
+             } else if (this.grid[y]) {
+                 this.grid[y][x] = null; // Ensure null even if it wasn't the expected item
+             }
+             // Visuals assumed destroyed by caller (shrinkAndClear or bonus path pre-destroy)
+        });
+
+        // --- LOGGING ---
+        console.log("[ClearAndRefill] Grid data cleared. Calling generateReplacements.");
+        // --- END LOGGING ---
         this.generateReplacements(locations, bonusData);
     }
 
-    // Modify generateReplacements signature & logic
+    // generateReplacements - Add logs
     generateReplacements(locations, bonusData = null) {
+        // --- LOGGING ---
+        console.log(`[GenerateReplacements] Start. Locations: ${locations.length}. Bonus items: ${bonusData ? bonusData.length : 0}.`);
+        // --- END LOGGING ---
         let newlyGeneratedItems = [];
-        const locationsFilledByBonus = new Set(); // Track locations used by bonus items
-        const locationKey = (loc) => `${loc.x},${loc.y}`; // Helper for Set keys
+        const newSprites = [];
+        const newBackgrounds = []; // Restore background array
+        const locationsFilledByBonus = new Set();
+        const locationKey = (loc) => `${loc.x},${loc.y}`;
 
         // 1. Generate Specific Bonus Items First
         if (bonusData) {
-             console.log(`Generating ${bonusData.length} bonus items.`);
+             console.log(`[GenerateReplacements] Generating ${bonusData.length} bonus items.`);
              bonusData.forEach(bonusItem => {
+                // ... (generate bonus item data, create visuals, add to arrays) ...
                 const { x, y, spriteIndex, color } = bonusItem;
-                // Create data structure (similar to generateNonMatchingItem but with fixed values)
-                 const newItemData = { spriteIndex, color, x, y, sprite: null }; 
-                 this.grid[y][x] = newItemData;
-                 
-                 console.log(`Placing bonus item ${spriteIndex+1} (${color.toString(16)}) at (${x},${y})`);
-                 this._createGridItemVisuals(newItemData, x, y); // Use helper
-
-                 locationsFilledByBonus.add(locationKey({x, y}));
-                 newlyGeneratedItems.push(newItemData);
+                const newItemData = { spriteIndex, color, x, y, sprite: null };
+                this.grid[y][x] = newItemData;
+                // Create visuals (returns object with sprite and background)
+                const visuals = this._createGridItemVisuals(newItemData, x, y);
+                if (visuals.sprite) newSprites.push(visuals.sprite); // Add sprite
+                if (visuals.background) newBackgrounds.push(visuals.background); // Add background
+                locationsFilledByBonus.add(locationKey({x, y}));
+                newlyGeneratedItems.push(newItemData);
              });
         }
 
         // 2. Generate Random Replacements for Remaining Locations
+        console.log(`[GenerateReplacements] Generating random replacements for remaining ${locations.length - locationsFilledByBonus.size} locations.`);
         locations.forEach(loc => {
-            // Skip locations already filled by bonus items
-            if (locationsFilledByBonus.has(locationKey(loc))) {
-                return; 
-            }
-
-            // Regular random generation for this empty spot
+            if (locationsFilledByBonus.has(locationKey(loc))) return;
+            // ... (generate random item data, create visuals, add to arrays) ...
             const { x, y } = loc;
-            if (this.grid[y]?.[x] !== null) { 
-                 // This might happen if a bonus item replaced an item that wasn't part of the original match? 
-                 // Or if locations has duplicates? Let's guard against it.
-                 console.warn(`generateReplacements: Location (${x},${y}) already filled, skipping random generation.`);
-                 return; 
+            if (this.grid[y]?.[x] !== null) {
+                console.warn(`[GenerateReplacements] Location (${x},${y}) already filled? Skipping.`);
+                return;
             }
             const newItemData = this.generateNonMatchingItem(x, y);
             this.grid[y][x] = newItemData;
-
-            this._createGridItemVisuals(newItemData, x, y); // Use helper
-
+            // Create visuals (returns object with sprite and background)
+            const visuals = this._createGridItemVisuals(newItemData, x, y);
+             if (visuals.sprite) newSprites.push(visuals.sprite); // Add sprite
+             if (visuals.background) newBackgrounds.push(visuals.background); // Add background
             newlyGeneratedItems.push(newItemData);
         });
 
-        console.log("Replacement generation complete, checking auto-matches...");
+        // 3. Start Simultaneous Appear Tweens
+        // Check both arrays
+        if (newSprites.length > 0 || newBackgrounds.length > 0) {
+            // --- LOGGING ---
+            console.log(`[GenerateReplacements] Starting appear tweens for ${newSprites.length} sprites and ${newBackgrounds.length} backgrounds.`);
+            // --- END LOGGING ---
+
+            // Tween backgrounds if they exist
+            if (newBackgrounds.length > 0) {
+                 this.tweens.add({ targets: newBackgrounds, scaleX: 1, scaleY: 1, alpha: 1, duration: APPEAR_DURATION, ease: 'Power2' });
+            }
+             // Tween sprites if they exist
+             if (newSprites.length > 0) {
+                this.tweens.add({ targets: newSprites,
+                    // Directly tween displayWidth and displayHeight instead of scale
+                    displayWidth: SPRITE_SIZE,
+                    displayHeight: SPRITE_SIZE,
+                    alpha: 1,
+                    duration: APPEAR_DURATION, ease: 'Power2' });
+             }
+        } else {
+            console.log("[GenerateReplacements] No new sprites/backgrounds to animate.");
+        }
+
+        // --- LOGGING ---
+        console.log("[GenerateReplacements] Calling preventAutoMatches.");
+        // --- END LOGGING ---
         this.preventAutoMatches(newlyGeneratedItems);
     }
 
@@ -1039,44 +1337,56 @@ class GameScene extends Phaser.Scene {
         const worldPos = this.getWorldCoordinatesFromGrid(gridX, gridY);
         const tileCenterX = worldPos.x;
         const tileCenterY = worldPos.y;
-        const bgSize = TILE_SIZE * 0.9;
-        const spriteSize = TILE_SIZE * 0.75;
-        const cornerRadius = 10;
 
-        // Create Background Graphics
-        const graphicsX = tileCenterX - bgSize / 2;
-        const graphicsY = tileCenterY - bgSize / 2;
+        // Create Background Graphics (Use Constants) - Keep this section
+        const graphicsX = tileCenterX - BG_SIZE / 2;
+        const graphicsY = tileCenterY - BG_SIZE / 2;
         const backgroundGraphics = this.add.graphics({ x: graphicsX, y: graphicsY });
         backgroundGraphics.fillStyle(itemData.color, 1);
-        backgroundGraphics.fillRoundedRect(0, 0, bgSize, bgSize, cornerRadius); 
-        backgroundGraphics.setDepth(0);
+        backgroundGraphics.fillRoundedRect(0, 0, BG_SIZE, BG_SIZE, CORNER_RADIUS);
+        backgroundGraphics.setDepth(0); // Background behind sprite
+        // Set initial state for appear animation (will be triggered later)
+        backgroundGraphics.setScale(0);
+        backgroundGraphics.setAlpha(0);
 
-        // Create Sprite
-        const itemSprite = this.items.create(tileCenterX, tileCenterY, SPRITE_SHEET_KEY, itemData.spriteIndex)
-            .setDisplaySize(spriteSize, spriteSize)
+        // Create Sprite (Use Constants)
+        // Use this.add.image for consistency with other parts maybe? Or stick to group.create
+        // Using group.create as it was before
+        const itemSprite = this.items.create(tileCenterX, tileCenterY, 'item_' + itemData.spriteIndex)
             .setInteractive()
-            .setDepth(1);
-        itemSprite.clearTint();
+            .setDepth(1); // Sprite in front of background
+        // REMOVE itemSprite.clearTint(); // Ensure no tinting is applied here
+
+        // SET Display Size directly using SPRITE_SIZE constant
+        itemSprite.setDisplaySize(SPRITE_SIZE, SPRITE_SIZE);
+
+        // Set initial state for appear animation (will be triggered later)
+        // REMOVED itemSprite.setScale(0);
+        // Set initial display size to 0 for tween start
+        itemSprite.setDisplaySize(0, 0);
+        itemSprite.setAlpha(0);
 
         // Store references
         itemData.sprite = itemSprite;
         itemSprite.setData('gridData', itemData);
-        itemSprite.setData('background', backgroundGraphics);
+        itemSprite.setData('background', backgroundGraphics); // Store background reference
 
-        return itemSprite; // Return the main sprite object
+        // Return the created visuals
+        return { sprite: itemSprite, background: backgroundGraphics }; // Return object
     }
 
     // Helper to set position of sprite and its background
     _setGridItemVisualPosition(itemSprite, worldX, worldY) {
-        if (!itemSprite) return;
+        if (!itemSprite || !itemSprite.scene) return; // Add scene check
 
         itemSprite.setPosition(worldX, worldY);
 
+        // Restore background positioning logic
         const background = itemSprite.getData('background');
-        if (background) {
-            const bgSize = TILE_SIZE * 0.9;
-            const graphicsX = worldX - bgSize / 2; // Calculate top-left for graphics
-            const graphicsY = worldY - bgSize / 2;
+        // Check if background exists and is a Graphics object and belongs to the scene
+        if (background && background instanceof Phaser.GameObjects.Graphics && background.scene) {
+            const graphicsX = worldX - BG_SIZE / 2; // Use Constant
+            const graphicsY = worldY - BG_SIZE / 2; // Use Constant
             background.setPosition(graphicsX, graphicsY);
         }
     }
@@ -1098,8 +1408,8 @@ class GameScene extends Phaser.Scene {
         }
         if (loops >= maxLoops) { console.error("Max loops reached in preventAutoMatches."); }
         
-        // Board is now stable, check for hints BEFORE enabling swap
-        this.checkForHints();
+        // Board is now stable, check for hints AFTER appear animations complete
+        this.time.delayedCall(APPEAR_DURATION + 50, this.checkForHints, [], this); // REINSTATED DELAY
         
         if (enableSwapOnFinish) {
              this.canSwap = true; 
@@ -1111,23 +1421,31 @@ class GameScene extends Phaser.Scene {
         const originalColor = itemData.color;
         let loops = 0;
 
-        while (loops < COLORS.length + 1) { // Try all colors + 1 safety
+        while (loops < COLORS.length + 1) {
              loops++;
              let newColor = Phaser.Utils.Array.GetRandom(COLORS);
              if (newColor !== originalColor && !this.checkMatchAt(x, y, newColor)) {
                  // Found a safe color
                  itemData.color = newColor;
-                 const background = itemData.sprite?.getData('background');
-                 if (background) {
-                     background.setFillStyle(newColor);
+                 // Restore background update logic
+                 const background = itemData.sprite?.getData('background'); // Use optional chaining
+                 // Check if background exists, is Graphics, and part of scene
+                 if (background && background instanceof Phaser.GameObjects.Graphics && background.scene) {
+                     try {
+                         background.clear(); // Clear previous drawing
+                         background.fillStyle(newColor, 1); // Set new fill style
+                         // Redraw the shape using the constants
+                         background.fillRoundedRect(0, 0, BG_SIZE, BG_SIZE, CORNER_RADIUS);
+                     } catch (e) {
+                         console.warn(`Error updating background color for (${x},${y}):`, e);
+                     }
+                 } else if (itemData.sprite) { // Only warn if sprite exists but background doesn't
+                     console.warn(`RegenerateColor: Could not find background for item at (${x},${y}) to update color.`);
                  }
-                 // console.log(`Regenerated item at (${x}, ${y}) to color ${newColor}`);
                  return; // Exit function
              }
         }
-        // If we somehow tried all colors and none worked (very unlikely)
         console.warn(`Could not find a non-matching color for item at (${x}, ${y}) after ${loops} attempts.`);
-        // Leave the item as is, the loop in preventAutoMatches might fix neighbors
     }
 }
 
