@@ -51,6 +51,7 @@ class BootScene extends Phaser.Scene {
         this.load.audio('swapSound', 'sounds/swap.mp3');
         this.load.audio('matchSound', 'sounds/match.mp3');
         this.load.audio('bgm', 'sounds/bgm(reddish).mp3');
+        this.load.audio('moveSound', 'sounds/move.mp3');
     }
 
     create() {
@@ -380,7 +381,7 @@ class GameScene extends Phaser.Scene {
         item1.setAlpha(1);
         item2.setAlpha(1);
 
-        this.sound.play('swapSound', { volume: 0.5 });
+        this.sound.play('moveSound', { volume: 0.5 });
 
         const item1Data = item1.getData('gridData');
         const item2Data = item2.getData('gridData');
@@ -950,6 +951,9 @@ class GameScene extends Phaser.Scene {
             // Use delayedCall to stagger the start of each sprite's animation
             this.time.delayedCall(index * staggerDelay, () => {
                  console.log(`[PlayOrderUIAnimation] Animating sprite ${index}`);
+
+                 // Play swapSound when item pops
+                 this.sound.play('swapSound', { volume: 0.4 }); // Added sound effect
 
                  // First Tween: Pop out near center
                  this.tweens.add({
