@@ -15,7 +15,7 @@ const APPEAR_DURATION = 250; // Duration for appear animation - REINSTATED
 // --- New Order System Config ---
 const MAX_ACTIVE_ORDERS = 5;
 const ORDER_GENERATION_INTERVAL = 5000; // milliseconds (1 minute)
-const TOTAL_ORDERS_TO_WIN = 20; // Changed from 5
+const TOTAL_ORDERS_TO_WIN = 10; // Changed from 5
 // Level thresholds: index = level - 2, value = orders needed to reach level
 const LEVEL_THRESHOLDS = [5, 10, 15]; // Reach Lvl 2 at 5, Lvl 3 at 10, Lvl 4 at 15
 const MAX_ORDER_LENGTH = 5; // Absolute max items per order
@@ -161,7 +161,7 @@ class GameScene extends Phaser.Scene {
         // --- Win Screen Setup ---
         this.winScreenGroup = this.add.group();
         const winBg = this.add.rectangle(this.game.config.width / 2, this.game.config.height / 2, this.game.config.width * 0.8, 150, 0x000000, 0.85).setDepth(10);
-        const winText = this.add.text(this.game.config.width / 2, this.game.config.height / 2, `YOU WIN!\nClick to Continue`,
+        const winText = this.add.text(this.game.config.width / 2, this.game.config.height / 2, `All orders filled!\nClick to Continue`,
             { fontSize: '28px', fill: '#0f0', align: 'center', padding: 10 }
         ).setOrigin(0.5).setDepth(11);
         this.winScreenGroup.addMultiple([winBg, winText]);
