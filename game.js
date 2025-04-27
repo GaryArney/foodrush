@@ -71,6 +71,11 @@ class BootScene extends Phaser.Scene {
             frameHeight: 48   // Assuming same frame height
         });
         // --- End Player Walking Spritesheet Loading ---
+
+        // --- REMOVE Particle Texture Loading --- 
+        // console.log("BootScene: Loading particle texture...");
+        // this.load.image('particle', 'sprites/particle.png');
+        // --- End Particle Texture Loading ---
     }
 
     create() {
@@ -111,6 +116,12 @@ class GameScene extends Phaser.Scene {
         this.foodChainCounter = 0;
         this.foodChainFadeTimer = null; // Timer for fade-out effect
         this.orderChainText = null; // Re-add property
+        this.lastFoodChainMatchTime = 0; // Timestamp of the last match in the chain
+        this.fastChainCounter = 0; // Counter for consecutive fast chain matches
+
+        // --- Particle System --- 
+        this.matchEmitter = null; // Initialize to null here
+        // MOVED creation to create()
     }
 
     preload() {
@@ -126,6 +137,8 @@ class GameScene extends Phaser.Scene {
         this.nextOrderId = 0;
         this.activeOrders = [];
         this.foodChainCounter = 0; // Reset food chain counter
+        this.lastFoodChainMatchTime = 0; // Reset last match time
+        this.fastChainCounter = 0; // Reset fast chain counter
 
         // Clear previous display groups if they exist
         if (this.orderDisplayGroup) {
@@ -312,6 +325,61 @@ class GameScene extends Phaser.Scene {
         this.orderChainText.setName('orderChainText'); // Give it a name for timer tracking
         console.log("GameScene: Initialized order chain feedback text.");
         // --- End Re-add Feedback Text Setup ---
+
+        // --- Fast Food Chain Text Setup ---
+        const fastChainTextStyle = { 
+            fontSize: '24px', // Larger text
+            fill: '#ff4444', // Reddish color
+            stroke: '#000000', 
+            strokeThickness: 7, 
+            align: 'center' 
+        };
+        const gridCenterX = (this.game.config.width - (GRID_WIDTH * TILE_SIZE)) / 2 + (GRID_WIDTH * TILE_SIZE) / 2;
+        const gridCenterY = UI_AREA_HEIGHT + (GRID_HEIGHT * TILE_SIZE) / 2;
+
+        // Calculate Y position relative to foodChainText
+        const fastChainTextY = UI_AREA_HEIGHT - 50; // 30px above foodChainText (at UI_AREA_HEIGHT - 20)
+
+        this.fastChainText = this.add.text(
+            gridCenterX, // Keep centered horizontally
+            fastChainTextY, // New Y position, above foodChainText
+            '', // Start empty
+            fastChainTextStyle
+        ).setOrigin(0.5).setDepth(202).setVisible(false);
+        this.fastChainText.setName('fastChainText'); // Name for timer tracking
+        console.log("GameScene: Initialized fast food chain feedback text.");
+         // --- End Fast Food Chain Text Setup ---
+
+        // --- Particle System Setup (Moved from Constructor) ---
+        // Use a placeholder item texture initially
+        const initialTextureKey = 'item_0'; 
+        try {
+            // Make sure the initial texture exists before creating
+            if (this.textures.exists(initialTextureKey)) {
+                this.matchEmitter = this.add.particles(0, 0, initialTextureKey, { 
+                    speed: { min: 50, max: 150 },
+                    angle: { min: 0, max: 360 },
+                    // Adjust scale for potentially larger item textures
+                    scale: { start: 0.4, end: 0 }, 
+                    alpha: { start: 1, end: 0 }, 
+                    lifespan: { min: 200, max: 1000 }, // Slightly shorter lifespan?
+                    gravityY: 150, // Maybe slightly more gravity
+                    blendMode: 'NORMAL', // Use NORMAL blend for sprites, ADD might look weird
+                    frequency: -1, // Manual burst only
+                    active: true // Activate now that texture exists
+                    // Tint is removed, we use the sprite's texture
+                });
+                this.matchEmitter.setDepth(2); 
+                console.log("GameScene: Particle emitter created using initial texture.");
+            } else {
+                console.warn(`GameScene: Initial particle texture '${initialTextureKey}' not found. Skipping emitter creation.`);
+                this.matchEmitter = null;
+            }
+        } catch (e) {
+            console.error("GameScene: Error creating particle system:", e);
+            this.matchEmitter = null; 
+        }
+        // --- End Particle System Setup ---
 
         // --- Initial Game State ---
         this.generateInitialOrder(); // Generate the first order
@@ -565,11 +633,38 @@ class GameScene extends Phaser.Scene {
 
             if (allMatches.length > 0) {
                 console.log("[AttemptSwap] Swap resulted in matches. Processing...");
+                const currentTime = this.time.now; // Get current time
+
                 // --- Food Chain Logic Update ---
-                // Store the counter BEFORE processing the match
-                const counterBeforeThisMatch = previousChainCount; 
-                this.foodChainCounter = previousChainCount + 1; // Increment based on previous state
+                const counterBeforeThisMatch = previousChainCount;
+                this.foodChainCounter = previousChainCount + 1;
                 console.log(`[Food Chain] Counter incremented to: ${this.foodChainCounter}`);
+
+                // --- Fast Food Chain Check & Update ---
+                if (counterBeforeThisMatch >= 1) { // Was the previous state *any* chain?
+                    const timeDiff = currentTime - this.lastFoodChainMatchTime;
+                    console.log(`[Fast Chain] Time since last chain match: ${timeDiff}ms`);
+                    if (timeDiff < 2000) { // FAST chain continues
+                        this.fastChainCounter++; // Increment fast chain counter
+                        const fastChainMessage = `FAST FOOD CHAIN! x${this.fastChainCounter}`;
+                        this._showTemporaryText(this.fastChainText, fastChainMessage, 700); 
+                        console.log(`[Fast Chain] Triggered! Count: ${this.fastChainCounter}`);
+                        // Optional: Add extra sound/effect here?
+                    } else { // Fast chain BROKEN by time
+                        console.log("[Fast Chain] Broken by time.");
+                        this.fastChainCounter = 0; // Reset counter
+                    }
+                } else { // Previous state was not a chain, so fast chain cannot start/continue here
+                    this.fastChainCounter = 0; // Reset counter
+                }
+                // --- End Fast Food Chain Check & Update ---
+
+                // --- Update Last Match Time --- 
+                // Always update if a match occurred that continued or started the chain
+                this.lastFoodChainMatchTime = currentTime;
+                // --- End Update --- 
+
+                // --- Show Regular Food Chain Text (If applicable) ---
                 if (this.foodChainCounter >= 2) {
                     this.foodChainText.setText(`Food Chain x${this.foodChainCounter}`);
                     this.foodChainText.setVisible(true);
@@ -614,6 +709,7 @@ class GameScene extends Phaser.Scene {
                 // No match occurred after swap
                 console.log("[AttemptSwap] No match after swap. Re-enabling swap and checking hints.");
                 // Food chain counter was already reset at the start of attemptSwap
+                this.fastChainCounter = 0; // Reset fast chain counter if regular chain breaks
                 this.canSwap = true;
                 // Check for hints AFTER board is stable (swap animation finished)
                 // Reduced delay slightly as APPEAR_DURATION isn't relevant here
@@ -824,8 +920,26 @@ class GameScene extends Phaser.Scene {
         this.stopAllHints();
         this.canSwap = false;
 
-        console.log(`[ProcessMatches] Found ${matches.length} matched items.`);
+        // Define uniqueItems early so particles can use it
         const uniqueItems = [...new Set(matches)];
+
+        // --- Trigger Match Particles --- 
+        if (this.matchEmitter) {
+             uniqueItems.forEach(itemData => {
+                 if (itemData) { 
+                    const worldPos = this.getWorldCoordinatesFromGrid(itemData.x, itemData.y);
+                    const textureKey = 'item_' + itemData.spriteIndex;
+                    // Set the texture dynamically
+                    this.matchEmitter.setTexture(textureKey);
+                    // REMOVED: this.matchEmitter.setTint(itemData.color); 
+                    // Explode using the newly set texture
+                    this.matchEmitter.explode(8, worldPos.x, worldPos.y); // Reduced count slightly
+                 }
+             });
+        }
+        // --- End Trigger Match Particles ---
+
+        console.log(`[ProcessMatches] Found ${matches.length} matched items.`);
         const matchedIndices = uniqueItems.map(itemData => itemData.spriteIndex);
         const matchLocations = uniqueItems.map(itemData => ({ x: itemData.x, y: itemData.y }));
 
@@ -1594,12 +1708,22 @@ class GameScene extends Phaser.Scene {
         this.tweens.killAll(); // Stop all active tweens forcefully (redundant but safe)
         this.time.removeAllEvents(); // Remove all timed events
 
+        // --- Clean up Particle System --- 
+        if (this.matchEmitter) {
+            this.matchEmitter.stop(); // Stop emitting new particles
+             // Optionally destroy manager if re-creating fully
+             // if (this.particleManager) this.particleManager.destroy(); 
+        }
+        // --- End Particle Cleanup ---
+
         // Reset state variables
         this.isGameWon = false;
         this.completedOrders = 0;
         this.nextOrderId = 0;
         this.activeOrders = [];
         this.foodChainCounter = 0; // Reset food chain counter
+        this.lastFoodChainMatchTime = 0; // Reset last match time
+        this.fastChainCounter = 0; // Reset fast chain counter
 
         // Hide overlays
         if (this.winScreenGroup) this.winScreenGroup.setVisible(false);
@@ -1617,6 +1741,16 @@ class GameScene extends Phaser.Scene {
             this.orderChainText.setVisible(false);
             // Clear specific timer property
             const timerProp = `${this.orderChainText.name}_fadeTimer`;
+            if (this[timerProp]) {
+                this[timerProp].remove();
+                this[timerProp] = null;
+            }
+        }
+        // --- Clean up Fast Chain feedback text ---
+         if (this.fastChainText) {
+            this.tweens.killTweensOf(this.fastChainText);
+            this.fastChainText.setVisible(false);
+            const timerProp = `${this.fastChainText.name}_fadeTimer`;
             if (this[timerProp]) {
                 this[timerProp].remove();
                 this[timerProp] = null;
