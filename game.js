@@ -15,7 +15,7 @@ const APPEAR_DURATION = 250; // Duration for appear animation - REINSTATED
 // --- New Order System Config ---
 const MAX_ACTIVE_ORDERS = 5;
 const ORDER_GENERATION_INTERVAL = 5000; // milliseconds (1 minute)
-const TOTAL_ORDERS_TO_WIN = 10; // Changed from 5
+const TOTAL_ORDERS_TO_WIN = 25; // Changed from 5
 // Level thresholds: index = level - 2, value = orders needed to reach level
 const LEVEL_THRESHOLDS = [5, 10, 15]; // Reach Lvl 2 at 5, Lvl 3 at 10, Lvl 4 at 15
 const MAX_ORDER_LENGTH = 5; // Absolute max items per order
@@ -55,6 +55,22 @@ class BootScene extends Phaser.Scene {
         this.load.audio('matchSound', 'sounds/match.mp3');
         this.load.audio('bgm', 'sounds/bgm(reddish).mp3');
         this.load.audio('moveSound', 'sounds/move.mp3');
+
+        // --- Load Player Spritesheet ---
+        console.log("BootScene: Loading player spritesheet...");
+        this.load.spritesheet('player_idle', 'sprites/Player/FPlayer 1 idle.png', {
+            frameWidth: 48,   // Updated frame width to 48
+            frameHeight: 48   // Updated frame height to 48
+        });
+        // --- End Player Spritesheet Loading ---
+
+        // --- Load Player Walking Spritesheet ---
+        console.log("BootScene: Loading player walking spritesheet...");
+        this.load.spritesheet('player_walk', 'sprites/Player/FPlayer 1 walking.png', {
+            frameWidth: 48,   // Assuming same frame width
+            frameHeight: 48   // Assuming same frame height
+        });
+        // --- End Player Walking Spritesheet Loading ---
     }
 
     create() {
@@ -79,9 +95,6 @@ class GameScene extends Phaser.Scene {
         this.activeOrders = [];       // Holds the currently displayed orders
         this.totalOrdersToWin = TOTAL_ORDERS_TO_WIN; // Use constant
         this.isGameWon = false;
-        this.isGameOver = false;      // New game over state
-        this.winScreenGroup = null;
-        this.gameOverScreenGroup = null; // New game over screen
         this.completedOrders = 0;
         this.orderGenerationTimer = null; // Timer for new orders
         this.nextOrderId = 0;         // Counter for unique order IDs
@@ -104,7 +117,6 @@ class GameScene extends Phaser.Scene {
 
         // Reset states
         this.isGameWon = false;
-        this.isGameOver = false;
         this.completedOrders = 0;
         this.nextOrderId = 0;
         this.activeOrders = [];
@@ -115,9 +127,6 @@ class GameScene extends Phaser.Scene {
         }
         if (this.winScreenGroup) {
             this.winScreenGroup.destroy(true); // Destroy group and children
-        }
-        if (this.gameOverScreenGroup) {
-            this.gameOverScreenGroup.destroy(true);
         }
         if (this.items) {
              // Ensure items and their backgrounds are cleared (safety check)
@@ -153,6 +162,107 @@ class GameScene extends Phaser.Scene {
             { fontSize: '14px', fill: '#0f0', align: 'right' }
         ).setOrigin(1, 0).setDepth(this.uiDepth);
 
+        // --- Define Player Animations (8 Directions) ---
+        const directions = [
+            'left', 'right', 'facing', 'away',
+            'diag_left', 'diag_right', 'away_left', 'away_right'
+        ];
+        const framesPerRow = 4; // 4 columns
+        directions.forEach((dir, rowIndex) => {
+            const startFrame = rowIndex * framesPerRow;
+            this.anims.create({
+                key: `player_idle_${dir}`, // e.g., player_idle_left
+                frames: this.anims.generateFrameNumbers('player_idle', { start: startFrame, end: startFrame + framesPerRow - 1 }),
+                frameRate: 6, // Adjust frame rate for individual animations if needed
+                repeat: -1 // Loop this direction's animation
+            });
+        });
+        console.log("GameScene: Created 8 directional player idle animations.");
+
+        // Define Walking Animations
+        directions.forEach((dir, rowIndex) => {
+            const startFrame = rowIndex * framesPerRow;
+            this.anims.create({
+                key: `player_walk_${dir}`, // e.g., player_walk_left
+                frames: this.anims.generateFrameNumbers('player_walk', { start: startFrame, end: startFrame + framesPerRow - 1 }),
+                frameRate: 8, // Adjust frame rate for walking if needed
+                repeat: -1 // Loop this direction's walking animation
+            });
+        });
+        console.log("GameScene: Created 8 directional player walking animations.");
+        // --- End Define Player Animations ---
+
+        // --- Add Player Sprite ---
+        this.playerSprite = this.add.sprite( // Store sprite reference on 'this'
+            this.completedOrdersText.x - this.completedOrdersText.width / 2, // Align center with text
+            this.completedOrdersText.y + this.completedOrdersText.height + 10, // Below text + padding
+            'player_idle' // Use spritesheet key
+            // REMOVED frame index 0
+        ).setOrigin(0.5, 0.5).setDepth(4); // Keep origin center (0.5, 0.5)
+        this.playerSprite.setScale(2); // Keep the sprite larger
+        this.playerSprite.play('player_idle_facing'); // Start with 'facing' animation
+        console.log(`GameScene: Added player sprite, playing 'player_idle_facing', scaled by 2, centered origin.`);
+
+        // --- Timer to change player direction ---
+        this.playerDirectionTimer = this.time.addEvent({
+            delay: 3000, // 3 seconds
+            callback: this.updatePlayerState, // Renamed function
+            callbackScope: this,
+            loop: true
+        });
+        console.log("GameScene: Started player state update timer (3s).");
+        // --- End Timer Setup ---
+
+        // --- Player Movement Boundaries & State ---
+        this.playerMovement = {
+            isMoving: false,
+            targetX: this.playerSprite.x,
+            targetY: this.playerSprite.y,
+            minX: 0, // Placeholder
+            maxX: 0, // Placeholder
+            minY: 0, // Placeholder
+            maxY: 0, // Placeholder
+            speed: 50 // Pixels per second, adjust as needed
+        };
+
+        // Calculate boundaries after sprite exists
+        const playerScaledWidth = this.playerSprite.displayWidth;
+        const playerScaledHeight = this.playerSprite.displayHeight;
+        const gridActualWidth = GRID_WIDTH * TILE_SIZE;
+        const gridScreenX = (this.game.config.width - gridActualWidth) / 2;
+        const gridRightEdge = gridScreenX + gridActualWidth;
+        const padding = 10;
+
+        // --- Re-Revised Horizontal Boundaries ---
+        // Max X: Game width minus padding and half sprite width
+        this.playerMovement.maxX = this.game.config.width - padding - (playerScaledWidth / 2);
+        // Min X: Grid right edge plus padding and half sprite width
+        this.playerMovement.minX = gridRightEdge + padding + (playerScaledWidth / 2);
+        // --- End Re-Revised Horizontal Boundaries ---
+
+        // Keep Y within the top UI area
+        this.playerMovement.minY = padding + (playerScaledHeight / 2); // Top padding + half height
+        this.playerMovement.maxY = UI_AREA_HEIGHT - padding - (playerScaledHeight / 2); // Bottom of UI area - padding - half height
+
+        // Ensure min/max are valid
+        if (this.playerMovement.minX > this.playerMovement.maxX) {
+            // If grid edge + padding pushes past screen edge - padding, clamp minX to maxX
+            console.warn("[Player Bounds] minX calculated past maxX. Clamping minX to maxX.");
+            this.playerMovement.minX = this.playerMovement.maxX;
+        }
+        if (this.playerMovement.minY > this.playerMovement.maxY) {
+             // If UI area is too small, fix Y
+             this.playerMovement.minY = UI_AREA_HEIGHT / 2;
+             this.playerMovement.maxY = UI_AREA_HEIGHT / 2;
+        }
+        // Set initial target within new bounds if needed
+        this.playerMovement.targetX = Phaser.Math.Clamp(this.playerSprite.x, this.playerMovement.minX, this.playerMovement.maxX);
+        this.playerMovement.targetY = Phaser.Math.Clamp(this.playerSprite.y, this.playerMovement.minY, this.playerMovement.maxY);
+        this.playerSprite.setPosition(this.playerMovement.targetX, this.playerMovement.targetY); // Move sprite into bounds immediately
+
+        console.log("Player Movement Boundaries (UI Area):", this.playerMovement);
+        // --- End Player Movement Boundaries ---
+
         // --- Grid Setup ---
         this.createGridData();
         this.drawGrid();
@@ -166,15 +276,6 @@ class GameScene extends Phaser.Scene {
         ).setOrigin(0.5).setDepth(11);
         this.winScreenGroup.addMultiple([winBg, winText]);
         this.winScreenGroup.setVisible(false);
-
-        // --- Game Over Screen Setup ---
-        this.gameOverScreenGroup = this.add.group();
-        const loseBg = this.add.rectangle(this.game.config.width / 2, this.game.config.height / 2, this.game.config.width * 0.8, 150, 0x000000, 0.85).setDepth(10);
-        const loseText = this.add.text(this.game.config.width / 2, this.game.config.height / 2, `GAME OVER!\nCustomers walked out.\nClick to Retry`,
-            { fontSize: '24px', fill: '#f00', align: 'center', padding: 10 }
-        ).setOrigin(0.5).setDepth(11);
-        this.gameOverScreenGroup.addMultiple([loseBg, loseText]);
-        this.gameOverScreenGroup.setVisible(false);
 
         // --- Initial Game State ---
         this.generateInitialOrder(); // Generate the first order
@@ -604,10 +705,10 @@ class GameScene extends Phaser.Scene {
         // --- END LOGGING ---
 
         // Add check for gameOver state
-        if (matches.length === 0 || this.isGameWon || this.isGameOver) {
+        if (matches.length === 0 || this.isGameWon) {
              console.log("[ProcessMatches] No matches or game finished, exiting.");
             // If no matches, ensure hints are checked AFTER board state is stable
-            if (!this.isGameWon && !this.isGameOver && this.canSwap) {
+            if (!this.isGameWon && this.canSwap) {
                 this.time.delayedCall(APPEAR_DURATION + 50, this.checkForHints, [], this);
             }
             return;
@@ -793,15 +894,22 @@ class GameScene extends Phaser.Scene {
 
                         // Prepare Bonus Item Data
                         bonusItemDataToGenerate = [];
-                        for (let i = 0; i < numBonusItems && i < matchLocations.length; i++) {
+                        // --- MODIFICATION: Only generate ONE bonus item max ---
+                        if (numBonusItems > 0 && matchLocations.length > 0 && targetOrder.requiredIndices.length > 0) {
+                             // Pick one required index from the target order
+                             const singleBonusIndex = Phaser.Utils.Array.GetRandom(targetOrder.requiredIndices);
+                             // Use the first match location for placement
+                             const placementLoc = matchLocations[0]; 
                              bonusItemDataToGenerate.push({
-                                spriteIndex: bonusItemIndices[i],
+                                spriteIndex: singleBonusIndex,
                                 color: bonusColor,
-                                x: matchLocations[i].x,
-                                y: matchLocations[i].y
+                                x: placementLoc.x,
+                                y: placementLoc.y
                              });
+                             console.log(`[ProcessMatches] Prepared 1 bonus item (instead of ${numBonusItems})`);
                         }
-                         console.log(`[ProcessMatches] Prepared ${bonusItemDataToGenerate.length} bonus items.`);
+                        // --- END MODIFICATION ---
+                         // console.log(`[ProcessMatches] Prepared ${bonusItemDataToGenerate.length} bonus items.`); // Old log
                     } else {
                          console.log("[ProcessMatches] Match size doesn't qualify for bonus items.");
                     }
@@ -1040,12 +1148,58 @@ class GameScene extends Phaser.Scene {
                 console.warn(`[GenerateReplacements] Location (${x},${y}) already filled? Skipping random.`);
                 return;
             }
-            const newItemData = this.generateNonMatchingItem(x, y);
-            this.grid[y][x] = newItemData;
-            const visuals = this._createGridItemVisuals(newItemData, x, y);
-            if (visuals.sprite) newSprites.push(visuals.sprite);
-            if (visuals.background) newBackgrounds.push(visuals.background);
-            newlyGeneratedItems.push(newItemData);
+
+            let newItemData;
+            let attempts = 0;
+            const maxAttempts = 20; // Safety break
+            let isSafeToPlace = false;
+
+            // Keep generating until a non-matching item is found
+            do {
+                newItemData = this._generateRandomItemData(x, y);
+                attempts++;
+
+                // --- Robust Check: Temporarily place and run full findMatches --- 
+                const originalGridValue = this.grid[y][x]; // Store original (should be null)
+                this.grid[y][x] = newItemData; // Temporarily place
+
+                const matchesFound = this.findMatches(); // Check whole board
+                isSafeToPlace = true; // Assume safe initially
+
+                // Check if the temporarily placed item is part of any match
+                for (const match of matchesFound) {
+                    if (match.x === x && match.y === y) {
+                        isSafeToPlace = false; // Found a match involving this item
+                        break;
+                    }
+                }
+
+                // If not safe, revert the grid change
+                if (!isSafeToPlace) {
+                    this.grid[y][x] = originalGridValue;
+                    // console.log(`  - Item at (${x},${y}) caused match. Regenerating...`);
+                }
+                // --- End Robust Check ---
+
+                if (attempts > maxAttempts) {
+                    console.error(`[GenerateReplacements] Max attempts (${maxAttempts}) reached for (${x},${y}). Reverting and skipping slot.`);
+                    this.grid[y][x] = originalGridValue; // Ensure grid is reverted
+                    newItemData = null; // Mark as failed
+                    break; // Avoid infinite loop
+                }
+            } while (!isSafeToPlace);
+
+            // Only proceed if an item was successfully found and placed
+            if (newItemData) {
+                console.log(`[GenerateReplacements] Placing verified (robust check) non-matching item at (${x},${y}): Color ${newItemData.color.toString(16)}`);
+                // newItemData is already on the grid from the temporary check
+                const visuals = this._createGridItemVisuals(newItemData, x, y);
+                if (visuals.sprite) newSprites.push(visuals.sprite);
+                if (visuals.background) newBackgrounds.push(visuals.background);
+                newlyGeneratedItems.push(newItemData);
+            } else {
+                 console.warn(`[GenerateReplacements] Failed to find safe item for (${x},${y}) after ${maxAttempts} attempts.`);
+            }
         });
 
         // 3. Start Simultaneous Appear Tweens for newly created items
@@ -1063,13 +1217,18 @@ class GameScene extends Phaser.Scene {
             console.log("[GenerateReplacements] No new sprites/backgrounds to animate this cycle.");
         }
 
-        console.log("[GenerateReplacements] Calling preventAutoMatches.");
+        // Add a small delay before checking for auto-matches to make regeneration less jarring
+        // REMOVED Delay - preventAutoMatches should find nothing now from newly generated items
+        console.log("[GenerateReplacements] Calling preventAutoMatches immediately.");
         this.preventAutoMatches(newlyGeneratedItems);
     }
 
     // preventAutoMatches - Simplified (No Queue Check)
     preventAutoMatches(newlyGeneratedItems, enableSwapOnFinish = true) {
-        console.log("[PreventAutoMatches] Checking for auto-matches...");
+        // --- DEBUG LOG --- 
+        const callId = Phaser.Math.RND.uuid(); // Unique ID for this call chain
+        console.log(`[PreventAutoMatches ${callId}] Start Check. Newly generated: ${newlyGeneratedItems.length}`);
+        // --- END DEBUG LOG ---
         let loops = 0; const maxLoops = GRID_WIDTH * GRID_HEIGHT;
         let regeneratedCount = 0;
 
@@ -1077,18 +1236,21 @@ class GameScene extends Phaser.Scene {
             loops++;
             const autoMatches = this.findMatches();
             if (autoMatches.length === 0) {
-                console.log("[PreventAutoMatches] No auto-matches found.");
+                console.log(`[PreventAutoMatches ${callId}] Loop ${loops}: No auto-matches found.`);
                 break;
             }
 
             const itemsToRegenerate = [...new Set(autoMatches)];
-            console.log(`[PreventAutoMatches] Auto-match detected! Regenerating ${itemsToRegenerate.length} items.`);
+            // --- DEBUG LOG --- 
+            console.log(`[PreventAutoMatches ${callId}] Loop ${loops}: Found ${autoMatches.length} matches involving ${itemsToRegenerate.length} unique items. Regenerating...`);
+            itemsToRegenerate.forEach(item => console.log(`  - Item to Regen: (${item.x},${item.y}), Color: ${item.color.toString(16)}, Sprite: ${SPRITE_NAMES[item.spriteIndex]}`));
+            // --- END DEBUG LOG ---
             if (itemsToRegenerate.length === 0) {
-                 console.warn("[PreventAutoMatches] autoMatches > 0 but no unique items? Breaking."); 
+                 console.warn(`[PreventAutoMatches ${callId}] Loop ${loops}: autoMatches > 0 but no unique items? Breaking.`); 
                  break; 
             }
             itemsToRegenerate.forEach(itemData => {
-                 this.regenerateItemColor(itemData); 
+                 this.regenerateItemColor(itemData, callId); 
                  regeneratedCount++;
             });
         }
@@ -1107,7 +1269,7 @@ class GameScene extends Phaser.Scene {
         console.log("[PreventAutoMatches] Board stable.");
         this.time.delayedCall(50, this.checkForHints, [], this); // Check hints shortly after stability
         
-        if (enableSwapOnFinish && !this.isGameOver && !this.isGameWon) {
+        if (enableSwapOnFinish && !this.isGameWon) {
              this.canSwap = true; 
              console.log("[PreventAutoMatches] Swapping enabled.");
         }
@@ -1166,7 +1328,7 @@ class GameScene extends Phaser.Scene {
 
     checkForHints() {
         // Add checks for game state
-        if (this.isGameWon || this.isGameOver) return;
+        if (this.isGameWon) return;
         
         this.stopAllHints(); // Clear previous hints and timer first
 
@@ -1229,7 +1391,7 @@ class GameScene extends Phaser.Scene {
 
     displayNextHintColor() {
         // Add checks for game state
-        if (this.isGameWon || this.isGameOver || !this.availableHintColors || this.availableHintColors.length === 0) {
+        if (this.isGameWon || !this.availableHintColors || this.availableHintColors.length === 0) {
             this.stopAllHints(); 
             return;
         }
@@ -1332,27 +1494,13 @@ class GameScene extends Phaser.Scene {
     // --- Order System Methods (Simplified) ---
     // --- Renamed from triggerWin to triggerWinCondition ---
     triggerWinCondition() {
-        if (this.isGameWon || this.isGameOver) return; // Prevent double trigger
+        if (this.isGameWon) return; // Prevent double trigger
         console.log("YOU WIN!");
         this.isGameWon = true;
         this.canSwap = false; // Disable further swaps
         this.stopOrderGenerationTimer(); // Stop new orders
         this.stopAllHints(); // Stop hints
         this.winScreenGroup.setVisible(true);
-
-        // Listen for a single click/tap anywhere to dismiss
-        this.input.once('pointerdown', this.restartGame, this); // Go to restart directly
-    }
-
-    // --- New triggerGameOver method ---
-    triggerGameOver() {
-        if (this.isGameWon || this.isGameOver) return; // Prevent double trigger
-        console.log("GAME OVER!");
-        this.isGameOver = true;
-        this.canSwap = false;
-        this.stopOrderGenerationTimer();
-        this.stopAllHints();
-        this.gameOverScreenGroup.setVisible(true);
 
         // Listen for a single click/tap anywhere to dismiss
         this.input.once('pointerdown', this.restartGame, this); // Go to restart directly
@@ -1365,19 +1513,26 @@ class GameScene extends Phaser.Scene {
         // Stop everything
         this.stopOrderGenerationTimer();
         this.stopAllHints();
-        this.tweens.killAll(); // Stop all active tweens forcefully
+        // Stop player direction timer
+        if (this.playerDirectionTimer) {
+            this.playerDirectionTimer.remove();
+            this.playerDirectionTimer = null;
+        }
+        // Stop player movement tween if active
+        if (this.playerSprite) {
+            this.tweens.killTweensOf(this.playerSprite);
+        }
+        this.tweens.killAll(); // Stop all active tweens forcefully (redundant but safe)
         this.time.removeAllEvents(); // Remove all timed events
 
         // Reset state variables
         this.isGameWon = false;
-        this.isGameOver = false;
         this.completedOrders = 0;
         this.nextOrderId = 0;
         this.activeOrders = [];
 
         // Hide overlays
         if (this.winScreenGroup) this.winScreenGroup.setVisible(false);
-        if (this.gameOverScreenGroup) this.gameOverScreenGroup.setVisible(false);
 
         // Reset orders visually and data-wise
         this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
@@ -1483,63 +1638,29 @@ class GameScene extends Phaser.Scene {
         }
     }
 
-    // Moved preventAutoMatches and regenerateItemColor UP to be defined before createGridData calls them
-    preventAutoMatches(newlyGeneratedItems, enableSwapOnFinish = true) {
-        console.log("[PreventAutoMatches] Checking for auto-matches...");
-        let loops = 0; const maxLoops = GRID_WIDTH * GRID_HEIGHT;
-        let regeneratedCount = 0;
-
-        while (loops < maxLoops) {
-            loops++;
-            const autoMatches = this.findMatches();
-            if (autoMatches.length === 0) {
-                console.log("[PreventAutoMatches] No auto-matches found.");
-                break;
-            }
-
-            const itemsToRegenerate = [...new Set(autoMatches)];
-            console.log(`[PreventAutoMatches] Auto-match detected! Regenerating ${itemsToRegenerate.length} items.`);
-            if (itemsToRegenerate.length === 0) {
-                 console.warn("[PreventAutoMatches] autoMatches > 0 but no unique items? Breaking."); 
-                 break; 
-            }
-            itemsToRegenerate.forEach(itemData => {
-                 this.regenerateItemColor(itemData); 
-                 regeneratedCount++;
-            });
-        }
-        if (loops >= maxLoops) { console.error("[PreventAutoMatches] Max loops reached in preventAutoMatches."); }
-
-        // If items were regenerated, the board changed, delay next steps
-        if (regeneratedCount > 0) {
-            console.log("[PreventAutoMatches] Items regenerated, delaying further checks.");
-             this.time.delayedCall(APPEAR_DURATION + 50, () => this.preventAutoMatches([], enableSwapOnFinish), [], this);
-             return; // Exit and re-check stability later
-        }
-        
-        // --- REMOVED Queue Processing Logic --- 
-
-        // Board is stable, now check hints and enable swap
-        console.log("[PreventAutoMatches] Board stable.");
-        this.time.delayedCall(50, this.checkForHints, [], this); // Check hints shortly after stability
-        
-        if (enableSwapOnFinish && !this.isGameOver && !this.isGameWon) {
-             this.canSwap = true; 
-             console.log("[PreventAutoMatches] Swapping enabled.");
-        }
-    }
-
-    regenerateItemColor(itemData) {
+    regenerateItemColor(itemData, preventAutoMatchesCallId) {
         const { x, y } = itemData;
         const originalColor = itemData.color;
+        // --- DEBUG LOG ---
+        console.log(`  [RegenColor ${preventAutoMatchesCallId}] Attempting Regen for (${x},${y}), Original Color: ${originalColor.toString(16)}`);
+        // --- END DEBUG LOG ---
         let loops = 0;
 
         while (loops < COLORS.length + 1) {
+            // --- DEBUG LOG ---
+            const attemptId = loops + 1;
+            // --- END DEBUG LOG ---
              loops++;
              let newColor = Phaser.Utils.Array.GetRandom(COLORS);
+            // --- DEBUG LOG ---
+            console.log(`    [RegenColor ${preventAutoMatchesCallId}] Attempt ${attemptId}: Trying Color ${newColor.toString(16)}`);
+            // --- END DEBUG LOG ---
              if (newColor !== originalColor && !this.checkMatchAt(x, y, newColor)) {
                  // Found a safe color
                  itemData.color = newColor;
+                 // --- DEBUG LOG ---
+                 console.log(`    [RegenColor ${preventAutoMatchesCallId}] Attempt ${attemptId}: SUCCESS! New Color: ${newColor.toString(16)}`);
+                 // --- END DEBUG LOG ---
                  // Restore background update logic
                  const background = itemData.sprite?.getData('background'); // Use optional chaining
                  // Check if background exists, is Graphics, and part of scene
@@ -1614,14 +1735,14 @@ class GameScene extends Phaser.Scene {
 
     generateNewOrderScheduled() {
         console.log("[OrderGen Timer] Attempting to generate new order...");
-        if (this.isGameWon || this.isGameOver) {
+        if (this.isGameWon) {
             console.log("[OrderGen Timer] Game finished, stopping generation.");
             return; // Don't generate if game is over or won
         }
 
         if (this.activeOrders.length >= MAX_ACTIVE_ORDERS) {
-            console.log(`[OrderGen Timer] Max orders (${MAX_ACTIVE_ORDERS}) reached. Triggering Game Over.`);
-            this.triggerGameOver();
+            console.log(`[OrderGen Timer] Max orders (${MAX_ACTIVE_ORDERS}) reached. Waiting for an order to be completed.`);
+            // No longer triggers game over, just returns and waits.
             return;
         }
 
@@ -1710,6 +1831,79 @@ class GameScene extends Phaser.Scene {
     }
 
     // --- End New Order System Methods ---
+
+    // --- NEW: Function to change player sprite animation ---
+    // RENAMED from changePlayerDirection to updatePlayerState
+    updatePlayerState() {
+        // Don't pick a new target if already moving or game ended
+        if (this.playerMovement.isMoving || !this.playerSprite || !this.playerSprite.scene || this.isGameWon) {
+            return;
+        }
+
+        // Pick a new random target position
+        const targetX = Phaser.Math.FloatBetween(this.playerMovement.minX, this.playerMovement.maxX);
+        const targetY = Phaser.Math.FloatBetween(this.playerMovement.minY, this.playerMovement.maxY);
+
+        const currentX = this.playerSprite.x;
+        const currentY = this.playerSprite.y;
+
+        // Calculate angle and distance
+        const angle = Phaser.Math.Angle.Between(currentX, currentY, targetX, targetY);
+        const distance = Phaser.Math.Distance.Between(currentX, currentY, targetX, targetY);
+
+        // Determine direction based on angle (refined 8-way)
+        const angleDeg = Phaser.Math.RadToDeg(angle);
+        let direction = 'facing'; // Default
+        let idleDirection = 'facing'; // Track idle direction separately
+
+        // Map angle to animation keys (adjust based on your spritesheet layout)
+        if (angleDeg >= -22.5 && angleDeg < 22.5)         { direction = 'right'; }
+        else if (angleDeg >= 22.5 && angleDeg < 67.5)    { direction = 'diag_right'; } // Down-Right
+        else if (angleDeg >= 67.5 && angleDeg < 112.5)   { direction = 'facing'; }     // Down
+        else if (angleDeg >= 112.5 && angleDeg < 157.5)  { direction = 'diag_left'; }  // Down-Left
+        else if (angleDeg >= 157.5 || angleDeg < -157.5) { direction = 'left'; }
+        else if (angleDeg >= -157.5 && angleDeg < -112.5) { direction = 'away_left'; }  // Up-Left
+        else if (angleDeg >= -112.5 && angleDeg < -67.5)  { direction = 'away'; }       // Up
+        else if (angleDeg >= -67.5 && angleDeg < -22.5)   { direction = 'away_right'; } // Up-Right
+
+        idleDirection = direction; // Idle uses the same direction key
+
+        const walkAnimationKey = `player_walk_${direction}`;
+        const idleAnimationKey = `player_idle_${idleDirection}`;
+
+        console.log(`[Player Update] Moving to (${targetX.toFixed(0)}, ${targetY.toFixed(0)}). Direction: ${direction}. Walk Anim: ${walkAnimationKey}`);
+        this.playerSprite.play(walkAnimationKey, true); // Play the WALK animation
+
+        // Calculate tween duration based on distance and speed
+        const duration = (distance / this.playerMovement.speed) * 1000; // in milliseconds
+
+        // Start the movement tween
+        this.playerMovement.isMoving = true;
+        this.tweens.add({
+            targets: this.playerSprite,
+            x: targetX,
+            y: targetY,
+            duration: duration,
+            ease: 'Linear', // Constant speed
+            onComplete: () => {
+                console.log(`[Player Update] Reached target. Switching to idle: ${idleAnimationKey}`);
+                this.playerMovement.isMoving = false;
+                // Switch to the corresponding IDLE animation on arrival
+                this.playerSprite.play(idleAnimationKey, true);
+            }
+        });
+    }
+    // --- END NEW Function ---
+
+    // --- Helper to generate raw random item data ---
+    _generateRandomItemData(x, y) {
+        let spriteIndex;
+        if (this.itemGenerationBag.length === 0) { this.refillItemGenerationBag(); }
+        spriteIndex = this.itemGenerationBag.pop();
+        const color = Phaser.Utils.Array.GetRandom(COLORS);
+        return { spriteIndex: spriteIndex, color: color, sprite: null, x: x, y: y };
+    }
+    // --- End Helper ---
 
 }
 
