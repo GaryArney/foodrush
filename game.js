@@ -890,32 +890,13 @@ class GameScene extends Phaser.Scene {
                     if (numBonusItems > 0) {
                          console.log(`[ProcessMatches] Calculating ${numBonusItems} bonus items...`);
                         // Determine Bonus Color (targets specific order)
-                        const colorCounts = {};
-                        COLORS.forEach(color => colorCounts[color] = 0);
-                        const targetIndices = new Set(targetOrder.requiredIndices);
-                        for(let y=0; y<GRID_HEIGHT; y++) {
-                            for(let x=0; x<GRID_WIDTH; x++) {
-                                const item = this.grid[y]?.[x];
-                                if(item && targetIndices.has(item.spriteIndex)) {
-                                    colorCounts[item.color]++;
-                                }
-                            }
-                        }
-                        let maxCount = -1;
-                        let bestColors = [];
-                        COLORS.forEach(color => {
-                            if (colorCounts[color] > maxCount) {
-                                maxCount = colorCounts[color];
-                                bestColors = [color];
-                            } else if (colorCounts[color] === maxCount) {
-                                bestColors.push(color);
-                            }
-                        });
-                        const bonusColor = Phaser.Utils.Array.GetRandom(bestColors);
-                        console.log(`[ProcessMatches] Bonus color chosen: ${bonusColor.toString(16)}`);
+                        // --- OPTIMIZATION: Select a completely random color instead of scanning grid --- 
+                        const bonusColor = Phaser.Utils.Array.GetRandom(COLORS);
+                        console.log(`[ProcessMatches] Bonus color chosen (randomly): ${bonusColor.toString(16)}`);
+                        // --- END OPTIMIZATION ---
 
                         // Select Bonus Item Indices from the target order
-                        const bonusItemIndices = [];
+                        const bonusItemIndices = []; // This is still needed if we revert bonus item count later
                         for (let i = 0; i < numBonusItems; i++) {
                             bonusItemIndices.push(Phaser.Utils.Array.GetRandom(targetOrder.requiredIndices));
                         }
@@ -1178,56 +1159,20 @@ class GameScene extends Phaser.Scene {
                 return;
             }
 
-            let newItemData;
-            let attempts = 0;
-            const maxAttempts = 20; // Safety break
-            let isSafeToPlace = false;
-
-            // Keep generating until a non-matching item is found
-            do {
-                newItemData = this._generateRandomItemData(x, y);
-                attempts++;
-
-                // --- Robust Check: Temporarily place and run full findMatches --- 
-                const originalGridValue = this.grid[y][x]; // Store original (should be null)
-                this.grid[y][x] = newItemData; // Temporarily place
-
-                const matchesFound = this.findMatches(); // Check whole board
-                isSafeToPlace = true; // Assume safe initially
-
-                // Check if the temporarily placed item is part of any match
-                for (const match of matchesFound) {
-                    if (match.x === x && match.y === y) {
-                        isSafeToPlace = false; // Found a match involving this item
-                        break;
-                    }
-                }
-
-                // If not safe, revert the grid change
-                if (!isSafeToPlace) {
-                    this.grid[y][x] = originalGridValue;
-                    // console.log(`  - Item at (${x},${y}) caused match. Regenerating...`);
-                }
-                // --- End Robust Check ---
-
-                if (attempts > maxAttempts) {
-                    console.error(`[GenerateReplacements] Max attempts (${maxAttempts}) reached for (${x},${y}). Reverting and skipping slot.`);
-                    this.grid[y][x] = originalGridValue; // Ensure grid is reverted
-                    newItemData = null; // Mark as failed
-                    break; // Avoid infinite loop
-                }
-            } while (!isSafeToPlace);
+            // --- Revert to simpler generation using local check ---
+            const newItemData = this.generateNonMatchingItem(x, y); // Use original function
+            this.grid[y][x] = newItemData; // Assign to grid
+            // --- End Revert ---
 
             // Only proceed if an item was successfully found and placed
             if (newItemData) {
-                console.log(`[GenerateReplacements] Placing verified (robust check) non-matching item at (${x},${y}): Color ${newItemData.color.toString(16)}`);
-                // newItemData is already on the grid from the temporary check
+                // console.log(`[GenerateReplacements] Placing (simple check) item at (${x},${y}): Color ${newItemData.color.toString(16)}`);
                 const visuals = this._createGridItemVisuals(newItemData, x, y);
                 if (visuals.sprite) newSprites.push(visuals.sprite);
                 if (visuals.background) newBackgrounds.push(visuals.background);
                 newlyGeneratedItems.push(newItemData);
             } else {
-                 console.warn(`[GenerateReplacements] Failed to find safe item for (${x},${y}) after ${maxAttempts} attempts.`);
+                 console.warn(`[GenerateReplacements] generateNonMatchingItem failed for (${x},${y})?`); // Should not happen often
             }
         });
 
