@@ -106,6 +106,11 @@ class GameScene extends Phaser.Scene {
         this.currentHintColorIndex = 0;
         this.hintTimer = null;
         this.hintedOrderSprites = new Set();
+
+        // --- Food Chain Combo --- 
+        this.foodChainCounter = 0;
+        this.foodChainFadeTimer = null; // Timer for fade-out effect
+        this.orderChainText = null; // Re-add property
     }
 
     preload() {
@@ -120,6 +125,7 @@ class GameScene extends Phaser.Scene {
         this.completedOrders = 0;
         this.nextOrderId = 0;
         this.activeOrders = [];
+        this.foodChainCounter = 0; // Reset food chain counter
 
         // Clear previous display groups if they exist
         if (this.orderDisplayGroup) {
@@ -276,6 +282,36 @@ class GameScene extends Phaser.Scene {
         ).setOrigin(0.5).setDepth(11);
         this.winScreenGroup.addMultiple([winBg, winText]);
         this.winScreenGroup.setVisible(false);
+
+        // --- Food Chain Text Setup ---
+        this.foodChainText = this.add.text(
+            this.game.config.width / 2, 
+            UI_AREA_HEIGHT - 20, // Position slightly above the grid (adjust 20 as needed)
+            '', // Start empty
+            { fontSize: '32px', fill: '#ffff00', stroke: '#000000', strokeThickness: 5, align: 'center' }
+        ).setOrigin(0.5).setDepth(200).setVisible(false); // High depth, initially hidden
+        console.log("GameScene: Initialized food chain text (above grid).");
+        // --- End Food Chain Text Setup ---
+
+        // --- Re-add Feedback Text Setup (Order Chain only) ---
+        const feedbackTextStyle = { 
+            fontSize: '36px', 
+            fill: '#ff8800', // Orange color for contrast
+            stroke: '#000000', 
+            strokeThickness: 6, 
+            align: 'center' 
+        };
+        const feedbackTextY = this.game.config.height * 0.6; // Lower center screen
+
+        this.orderChainText = this.add.text(
+            this.game.config.width / 2,
+            feedbackTextY,
+            '', // Start empty
+            feedbackTextStyle
+        ).setOrigin(0.5).setDepth(201).setVisible(false); // High depth, initially hidden
+        this.orderChainText.setName('orderChainText'); // Give it a name for timer tracking
+        console.log("GameScene: Initialized order chain feedback text.");
+        // --- End Re-add Feedback Text Setup ---
 
         // --- Initial Game State ---
         this.generateInitialOrder(); // Generate the first order
@@ -500,6 +536,12 @@ class GameScene extends Phaser.Scene {
 
         this.sound.play('moveSound', { volume: 0.5 });
 
+        // --- Food Chain Logic Start ---
+        const previousChainCount = this.foodChainCounter;
+        // Reset counter before checking outcome - assumes chain is broken unless match occurs
+        this.foodChainCounter = 0; 
+        // --- End Food Chain Logic Start ---
+
         const item1Data = item1.getData('gridData');
         const item2Data = item2.getData('gridData');
 
@@ -523,10 +565,55 @@ class GameScene extends Phaser.Scene {
 
             if (allMatches.length > 0) {
                 console.log("[AttemptSwap] Swap resulted in matches. Processing...");
-                this.processMatches(allMatches); // processMatches handles its own hint logic internally
+                // --- Food Chain Logic Update ---
+                // Store the counter BEFORE processing the match
+                const counterBeforeThisMatch = previousChainCount; 
+                this.foodChainCounter = previousChainCount + 1; // Increment based on previous state
+                console.log(`[Food Chain] Counter incremented to: ${this.foodChainCounter}`);
+                if (this.foodChainCounter >= 2) {
+                    this.foodChainText.setText(`Food Chain x${this.foodChainCounter}`);
+                    this.foodChainText.setVisible(true);
+                    this.foodChainText.setAlpha(1); // Ensure fully visible before pop/fade
+                    // Optional: Add a quick pop animation
+                    this.foodChainText.setScale(1.5);
+                    this.tweens.add({ targets: this.foodChainText, scale: 1, duration: 150, ease: 'Power2' });
+
+                    // --- Start Fade Out Timer ---
+                    // Clear any existing fade timer
+                    if (this.foodChainFadeTimer) {
+                        this.foodChainFadeTimer.remove();
+                    }
+                    // Create new timer
+                    this.foodChainFadeTimer = this.time.delayedCall(1000, () => {
+                        console.log("[Food Chain] Fading out text.");
+                        if (this.foodChainText && this.foodChainText.scene) {
+                            this.tweens.add({ 
+                                targets: this.foodChainText, 
+                                alpha: 0, 
+                                duration: 300, // Fade duration
+                                ease: 'Power1', 
+                                onComplete: () => { 
+                                    if(this.foodChainText) this.foodChainText.setVisible(false); 
+                                }
+                            });
+                        }
+                        this.foodChainFadeTimer = null; // Clear timer reference
+                    }, [], this);
+                    // --- End Fade Out Timer ---
+                } else {
+                     // If chain is 1, ensure text remains hidden or fades if previously shown
+                     if (this.foodChainText.visible && !this.foodChainFadeTimer) {
+                         // This case might not be strictly needed if reset handled well,
+                         // but ensures text hides if somehow left visible on chain=1
+                         this.tweens.add({ targets: this.foodChainText, alpha: 0, duration: 300, ease: 'Power1', onComplete: () => { if(this.foodChainText) this.foodChainText.setVisible(false); } });
+                     }
+                 }
+                // --- End Food Chain Logic Update ---
+                this.processMatches(allMatches, counterBeforeThisMatch); // Pass the counter BEFORE increment
             } else {
                 // No match occurred after swap
                 console.log("[AttemptSwap] No match after swap. Re-enabling swap and checking hints.");
+                // Food chain counter was already reset at the start of attemptSwap
                 this.canSwap = true;
                 // Check for hints AFTER board is stable (swap animation finished)
                 // Reduced delay slightly as APPEAR_DURATION isn't relevant here
@@ -718,7 +805,7 @@ class GameScene extends Phaser.Scene {
     }
 
     // --- Matching and Replacement Logic ---
-    processMatches(matches) {
+    processMatches(matches, previousChainCount) {
         // --- LOGGING ---
         console.log("[ProcessMatches] Start processing matches:", matches.length);
         // --- END LOGGING ---
@@ -758,6 +845,14 @@ class GameScene extends Phaser.Scene {
                     order.completed = true; // Mark as complete
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
+
+                    // --- Check if Match 3+, during chain >= 2, AND order length >= 3 triggered completion ---
+                    // Use the counter value *before* this match happened
+                    if (matches.length >= 3 && previousChainCount >= 2 && order.requiredIndices.length >= 3) { 
+                        this._showTemporaryText(this.orderChainText, "Up the food chain!", 500);
+                        console.log(`[Food Chain] Order #${order.id} (length ${order.requiredIndices.length}) completed during chain (match >= 3)! Placeholder for unlock.`);
+                    }
+                    // --- End Food Chain Check ---
 
                     // --- Apply visual style IMMEDIATELY ---
                     if (order.displayLabel) order.displayLabel.setAlpha(0.6);
@@ -1504,9 +1599,30 @@ class GameScene extends Phaser.Scene {
         this.completedOrders = 0;
         this.nextOrderId = 0;
         this.activeOrders = [];
+        this.foodChainCounter = 0; // Reset food chain counter
 
         // Hide overlays
         if (this.winScreenGroup) this.winScreenGroup.setVisible(false);
+        if (this.foodChainText) { 
+            this.foodChainText.setVisible(false); // Hide food chain text
+            this.tweens.killTweensOf(this.foodChainText); // Stop any active fade
+        }
+        if (this.foodChainFadeTimer) { // Clear fade timer
+            this.foodChainFadeTimer.remove();
+            this.foodChainFadeTimer = null;
+        }
+        // --- Clean up Order Chain feedback text ---
+        if (this.orderChainText) {
+            this.tweens.killTweensOf(this.orderChainText);
+            this.orderChainText.setVisible(false);
+            // Clear specific timer property
+            const timerProp = `${this.orderChainText.name}_fadeTimer`;
+            if (this[timerProp]) {
+                this[timerProp].remove();
+                this[timerProp] = null;
+            }
+        }
+        // --- End cleanup ---
 
         // Reset orders visually and data-wise
         this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
@@ -1893,6 +2009,48 @@ class GameScene extends Phaser.Scene {
         spriteIndex = this.itemGenerationBag.pop();
         const color = Phaser.Utils.Array.GetRandom(COLORS);
         return { spriteIndex: spriteIndex, color: color, sprite: null, x: x, y: y };
+    }
+    // --- End Helper ---
+
+    // --- Helper function for temporary feedback text ---
+    _showTemporaryText(textObject, message, displayDuration = 500, fadeDuration = 300) {
+        if (!textObject || !textObject.scene) return; // Safety check
+
+        console.log(`[Feedback] Showing: "${message}"`);
+
+        // Clear existing timer for *this specific text object*
+        const timerProp = `${textObject.name}_fadeTimer`; // e.g., orderChainText_fadeTimer
+        if (this[timerProp]) {
+            this[timerProp].remove();
+            this[timerProp] = null; // Clear the property
+        }
+
+        // Stop any active fade tween on this object
+        this.tweens.killTweensOf(textObject);
+
+        // Set text, make visible, pop
+        textObject.setText(message);
+        textObject.setVisible(true);
+        textObject.setAlpha(1);
+        textObject.setScale(1.5);
+        this.tweens.add({ targets: textObject, scale: 1, duration: 150, ease: 'Power2' });
+
+        // Start the fade-out timer
+        this[timerProp] = this.time.delayedCall(displayDuration, () => {
+            console.log(`[Feedback] Fading: "${message}"`);
+            if (textObject.scene) { // Check scene again in case of restart during delay
+                this.tweens.add({ 
+                    targets: textObject, 
+                    alpha: 0, 
+                    duration: fadeDuration, 
+                    ease: 'Power1', 
+                    onComplete: () => { 
+                        if(textObject && textObject.scene) textObject.setVisible(false); // Check scene again
+                    }
+                });
+            }
+            this[timerProp] = null; // Clear the property when timer finishes
+        }, [], this);
     }
     // --- End Helper ---
 
