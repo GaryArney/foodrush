@@ -287,33 +287,33 @@ class GameScene extends Phaser.Scene {
         this.time.delayedCall(100, this.checkForHints, [], this);
     }
 
-    update(time, delta) {
-       // Update static order display for COMPLETION
-        this.activeOrders.forEach(order => {
-            // Ensure label and sprites exist
-            if (order.displayLabel && order.displaySprites.length > 0) { 
-                if (order.completed) {
-                    // Apply visual cue to completed order (e.g., tint sprites)
-                    if (order.displaySprites[0].tintTopLeft !== 0x88ff88) { // Check tint only once
-                        order.displayLabel.setAlpha(0.6);
-                        order.displaySprites.forEach(sprite => {
-                            sprite.setTint(0x88ff88); // Apply green tint
-                            sprite.setAlpha(0.6);
-                        });
-                    }
-                } else {
-                    // Reset visual cue if previously completed (e.g., on restart)
-                     if (order.displaySprites[0].tintTopLeft === 0x88ff88) { // Check tint
-                         order.displayLabel.setAlpha(1);
-                         order.displaySprites.forEach(sprite => {
-                            sprite.clearTint();
-                            sprite.setAlpha(1);
-                        });
-                    }
-                }
-            }
-        });
-    }
+    // update(time, delta) {
+    //    // Update static order display for COMPLETION
+    //     this.activeOrders.forEach(order => {
+    //         // Ensure label and sprites exist
+    //         if (order.displayLabel && order.displaySprites.length > 0) { 
+    //             if (order.completed) {
+    //                 // Apply visual cue to completed order (e.g., tint sprites)
+    //                 if (order.displaySprites[0].tintTopLeft !== 0x88ff88) { // Check tint only once
+    //                     order.displayLabel.setAlpha(0.6);
+    //                     order.displaySprites.forEach(sprite => {
+    //                         sprite.setTint(0x88ff88); // Apply green tint
+    //                         sprite.setAlpha(0.6);
+    //                     });
+    //                 }
+    //             } else {
+    //                 // Reset visual cue if previously completed (e.g., on restart)
+    //                  if (order.displaySprites[0].tintTopLeft === 0x88ff88) { // Check tint
+    //                      order.displayLabel.setAlpha(1);
+    //                      order.displaySprites.forEach(sprite => {
+    //                         sprite.clearTint();
+    //                         sprite.setAlpha(1);
+    //                     });
+    //                 }
+    //             }
+    //         }
+    //     });
+    // }
 
     // --- Game Setup Methods ---
     refillItemGenerationBag() {
@@ -759,6 +759,16 @@ class GameScene extends Phaser.Scene {
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
 
+                    // --- Apply visual style IMMEDIATELY ---
+                    if (order.displayLabel) order.displayLabel.setAlpha(0.6);
+                    if (order.displaySprites) {
+                        order.displaySprites.forEach(sprite => {
+                            sprite.setTint(0x88ff88);
+                            sprite.setAlpha(0.6);
+                        });
+                    }
+                    // --- END Apply visual style ---
+
                     orderCompletedThisTurn = true;
                     uiSpritesToAnimate = order.displaySprites; // Get sprites for animation
                     completedOrderData = order; // Store the order to be removed later
@@ -840,16 +850,16 @@ class GameScene extends Phaser.Scene {
                     targetOrder.completed = true;
                     this.completedOrders++;
                     this.completedOrdersText.setText(`Completed: ${this.completedOrders}/${this.totalOrdersToWin}`);
-                    // Schedule removal and UI update for the auto-completed order
-                     const removalDelay = 100; // Short delay
-                     this.time.delayedCall(removalDelay, () => {
-                        console.log(`[ProcessMatches] Removing auto-completed order #${targetOrder.id}`);
-                        this.activeOrders = this.activeOrders.filter(o => o.id !== targetOrder.id);
-                        this._drawOrderUI();
-                     }, [], this);
-                     // Play sound/visual for auto-complete?
-                     this.sound.play('matchSound', { volume: 0.8, detune: -200 }); // Example sound
-                    // --- END FIX ---
+
+                    // --- Apply visual style IMMEDIATELY (Match 7+ Bonus) ---
+                    if (targetOrder.displayLabel) targetOrder.displayLabel.setAlpha(0.6);
+                    if (targetOrder.displaySprites) {
+                        targetOrder.displaySprites.forEach(sprite => {
+                            sprite.setTint(0x88ff88);
+                            sprite.setAlpha(0.6);
+                        });
+                    }
+                    // --- END Apply visual style ---
 
                     console.log("[ProcessMatches] Match 7+: Destroying original visuals...");
                     uniqueItems.forEach(itemData => {
@@ -1852,6 +1862,13 @@ class GameScene extends Phaser.Scene {
                 order.displaySprites.forEach(sprite => {
                     sprite.setTint(0x88ff88);
                     sprite.setAlpha(0.6);
+                });
+            } else {
+                // Ensure non-completed orders are drawn normally (handles potential state issues)
+                label.setAlpha(1);
+                order.displaySprites.forEach(sprite => {
+                     sprite.clearTint();
+                     sprite.setAlpha(1);
                 });
             }
 
