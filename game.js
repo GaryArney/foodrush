@@ -427,21 +427,40 @@ class GameScene extends Phaser.Scene {
 
     // --- Input Handling Methods ---
     onItemDown(pointer, gameObject) {
-        if (!this.canSwap || !gameObject.getData('gridData')) return; // Ensure it's a grid item and swapping is allowed
+        let targetSprite = null;
+        // Check if the interacted object is the background Graphics
+        if (gameObject instanceof Phaser.GameObjects.Graphics && gameObject.getData('itemSprite')) {
+            targetSprite = gameObject.getData('itemSprite');
+        } else if (gameObject instanceof Phaser.GameObjects.Sprite && gameObject.getData('gridData')) {
+            // Or if it's directly the sprite (fallback)
+            targetSprite = gameObject;
+        }
 
-        this.selectedItem = gameObject;
+        if (!this.canSwap || !targetSprite || !targetSprite.getData('gridData')) return;
+
+        this.selectedItem = targetSprite; // Store the SPRITE
         this.isDragging = true;
         this.dragStartX = pointer.x;
         this.dragStartY = pointer.y;
-        console.log("Item down:", this.selectedItem.getData('gridData').x, this.selectedItem.getData('gridData').y);
+        console.log("Item down (via background):", this.selectedItem.getData('gridData').x, this.selectedItem.getData('gridData').y);
     }
+
     onItemOver(pointer, gameObject) {
-        if (!this.isDragging || !this.selectedItem || gameObject === this.selectedItem || !gameObject.getData('gridData')) {
-            return; // Only interested if dragging over a *different* grid item
+        let targetSprite = null;
+        // Check if the interacted object is the background Graphics
+        if (gameObject instanceof Phaser.GameObjects.Graphics && gameObject.getData('itemSprite')) {
+            targetSprite = gameObject.getData('itemSprite');
+        } else if (gameObject instanceof Phaser.GameObjects.Sprite && gameObject.getData('gridData')) {
+            // Or if it's directly the sprite
+            targetSprite = gameObject;
         }
 
-        const item1Data = this.selectedItem.getData('gridData');
-        const item2Data = gameObject.getData('gridData');
+        if (!this.isDragging || !this.selectedItem || targetSprite === this.selectedItem || !targetSprite || !targetSprite.getData('gridData')) {
+            return; // Only interested if dragging over a *different* grid item's background/sprite
+        }
+
+        const item1Data = this.selectedItem.getData('gridData'); // selectedItem is always the sprite
+        const item2Data = targetSprite.getData('gridData'); // Get data from the hovered sprite
 
         // Check if the items are adjacent (horizontally or vertically)
         const dx = Math.abs(item1Data.x - item2Data.x);
@@ -450,7 +469,7 @@ class GameScene extends Phaser.Scene {
         if ((dx === 1 && dy === 0) || (dx === 0 && dy === 1)) {
             console.log("Adjacent item hovered:", item2Data.x, item2Data.y);
             // Initiate the swap immediately upon dragging over adjacent tile
-            this.attemptSwap(this.selectedItem, gameObject);
+            this.attemptSwap(this.selectedItem, targetSprite); // Pass the target SPRITE, not the gameObject
             // Reset drag state after attempting swap
             this.isDragging = false;
             this.selectedItem = null;
@@ -1600,12 +1619,17 @@ class GameScene extends Phaser.Scene {
         // Use this.add.image for consistency with other parts maybe? Or stick to group.create
         // Using group.create as it was before
         const itemSprite = this.items.create(tileCenterX, tileCenterY, 'item_' + itemData.spriteIndex)
-            .setInteractive()
+            // REMOVED basic .setInteractive()
             .setDepth(1); // Sprite in front of background
         // REMOVE itemSprite.clearTint(); // Ensure no tinting is applied here
 
         // SET Display Size directly using SPRITE_SIZE constant
         itemSprite.setDisplaySize(SPRITE_SIZE, SPRITE_SIZE);
+
+        // Make sprite interactive with a larger hit area matching the background
+        // REMOVED - Interactivity moved to background
+        // const hitArea = new Phaser.Geom.Rectangle(-BG_SIZE / 2, -BG_SIZE / 2, BG_SIZE, BG_SIZE);
+        // itemSprite.setInteractive(hitArea, Phaser.Geom.Rectangle.Contains);
 
         // Set initial state for appear animation (will be triggered later)
         // REMOVED itemSprite.setScale(0);
@@ -1616,7 +1640,12 @@ class GameScene extends Phaser.Scene {
         // Store references
         itemData.sprite = itemSprite;
         itemSprite.setData('gridData', itemData);
-        itemSprite.setData('background', backgroundGraphics); // Store background reference
+        itemSprite.setData('background', backgroundGraphics); // Sprite knows its background
+
+        // --- NEW: Make background interactive and link it to the sprite ---
+        backgroundGraphics.setData('itemSprite', itemSprite); // Background knows its sprite
+        backgroundGraphics.setInteractive(new Phaser.Geom.Rectangle(0, 0, BG_SIZE, BG_SIZE), Phaser.Geom.Rectangle.Contains);
+        // --- END NEW ---
 
         // Return the created visuals
         return { sprite: itemSprite, background: backgroundGraphics }; // Return object
